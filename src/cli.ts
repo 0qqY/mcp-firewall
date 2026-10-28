@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import spawn from 'cross-spawn';
 import { AuditLog } from './audit.js';
@@ -155,17 +156,10 @@ async function main(): Promise<void> {
   const audit = new AuditLog(policy.audit.enabled ? policy.audit.file : undefined, policy.audit.logAllowed, serverId);
   const pins = policy.pinning.enabled ? new PinStore(policy.pinning.file, serverId) : undefined;
 
-  // Load the model before starting the server: a missing model must fail loudly, not degrade silently.
-  let classifier: Classifier | undefined;
-  if (policy.ml.enabled) {
-    const started = Date.now();
-    try {
-      classifier = await loadTransformersClassifier(policy.ml.model, policy.ml);
-    } catch (err) {
-      process.stderr.write(`mcp-firewall: cannot load ML model ${policy.ml.model}: ${(err as Error).message}\n`);
-      process.exit(1);
-    }
-    audit.record({ verdict: 'info', reason: `ML classifier ${classifier.name} loaded in ${Date.now() - started} ms` });
+  // A missing model must fail loudly, not degrade silently, and before the server starts.
+  if (policy.ml.enabled && !existsSync(policy.ml.model)) {
+    process.stderr.write(`mcp-firewall: cannot load ML model ${policy.ml.model}: not found\n`);
+    process.exit(1);
   }
 
   // stdout belongs to the JSON-RPC stream; server stderr passes straight through for host logs.
@@ -183,13 +177,31 @@ async function main(): Promise<void> {
   process.stdin.on('end', () => child.stdin!.end());
   for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => child.kill(sig));
 
+  // The proxy calls this once the handshake has been answered; a model that cannot load stops the firewall.
+  let loadClassifier: (() => Promise<Classifier>) | undefined;
+  if (policy.ml.enabled) {
+    loadClassifier = () => {
+      const started = Date.now();
+      const loading = loadTransformersClassifier(policy.ml.model, policy.ml);
+      loading.then(
+        (loaded) => audit.record({ verdict: 'info', reason: `ML classifier ${loaded.name} loaded in ${Date.now() - started} ms` }),
+        (err: Error) => {
+          process.stderr.write(`mcp-firewall: cannot load ML model ${policy.ml.model}: ${err.message}\n`);
+          child.kill();
+          process.exit(1);
+        },
+      );
+      return loading;
+    };
+  }
+
   audit.record({ verdict: 'info', reason: `firewall started in ${policy.mode} mode` });
   new FirewallProxy(policy, audit, pins, {
     clientIn: process.stdin,
     clientOut: process.stdout,
     serverIn: child.stdin!,
     serverOut: child.stdout!,
-  }, classifier, () => fingerprintServer(options.command, options.args, options.code)).start();
+  }, loadClassifier, () => fingerprintServer(options.command, options.args, options.code)).start();
 }
 
 void main();

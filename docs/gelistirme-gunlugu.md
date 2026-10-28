@@ -149,3 +149,48 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     `tools/list` 3,7 saniyeye indi, 45 tool görünüyor (`delete_file` kuralla kapalı). Tool sonuçları ML ile
     engellenmeye devam ediyor. Açık iş: tanım kararlarını hash'e göre önbelleğe almak ve gerçek tool tanımlarıyla
     değerlendirme.
+49. **Bulgu: firewall kendi deposunun okunmasını engelliyor.** Yüklemeden sonra depo GitHub MCP üzerinden okundu.
+    `package.json` geçti ve içeriği yereldekiyle aynı çıktı (blob `b8e9565`). `README.md` ile `test/proxy.test.ts`
+    engellendi (skor 1,000); bu dosyalarda gerçek saldırı örnekleri ve sahte anahtarlar olduğu için bu beklenen bir
+    sonuç. Beklenmeyen engel commit listesindeydi (`list_commits`, 0,994). Varyant ölçümleri:
+    - commit mesajı tek başına 0,004, `Co-Authored-By` satırı tek başına 0,000;
+    - GitHub JSON'u içinde mesaj satırsız 0,57, satırla 0,99; satırdaki ad bir insan adı olunca da 0,998;
+    - konusu prompt olan tek satırlık mesaj da engelleniyor ("Add prompt template pinning" + satır: 1,000);
+    - sıradan mesajlar geçiyor ("Fix typo in README" 0,07; Türkçe sıradan bir mesaj 0,79, eşiğe yakın).
+
+    Model, prompt injection'ı *anlatan* zararsız metni tool sonucunun içinde görünce yüksek skor veriyor;
+    `Co-Authored-By` satırı skoru eşiğin üstüne taşıyor. Bu deponun geçmişi yerel git ile okunmalı. Kalıcı çözüm
+    eğitimde: güvenlik konulu zararsız metinler (commit mesajı, README, test açıklaması) zor negatif olarak
+    eklenmeli. Yan bulgu: leet çözücü ISO tarihlerini (`28T07` → `2bTot`) ve JSON kaçışlarını (`>` →
+    `\uooee`) bozuyor; bu kararı değiştirmedi (çözücü kapalıyken de 0,990).
+
+## J. MCP 2026-07-28 uyumu ve JSON'a duyarlı tarama (29.10.2026)
+
+50. **Bulgu: yeni oturumlarda GitHub tool'larının hepsi gizlendi.** 28.10.2026 sabahı 4 Code oturumunun 2'sinde,
+    akşam 3 oturumun 3'ünde 46 tool "tool definition changed since it was pinned" diye gizlendi. Claude Code 2.1.309,
+    MCP 2026-07-28 ile bağlanıyor (`server/discover`, isteklerde `_meta` zarfı); bu sürümde GitHub sunucusu her tool'a
+    `outputSchema` ekliyor ve `delete_repository`'yi de sunuyor (47 tool). Pinler test betikleriyle eski sürümde
+    (2025-06-18) alınmıştı. Saldırı değil: imaj digest ile sabit, iki sürüm arasındaki tek fark `outputSchema` (46/46
+    tool) ve tanımlar her çalıştırmada aynı. Geçici çözüm olarak `onChange: warn` yapıldı ve bekleyen tanımlar onaylandı.
+51. **Sürümden bağımsız tool pini:** pin, tanımın hash'i (`outputSchema` hariç) ile varsa `+` ve çıktı şemasının
+    hash'inden oluşuyor. Şemayı almayan istemcide yalnızca tanım karşılaştırılıyor. Şema ilk görüldüğünde `onNew: hide`
+    olsa bile sabitleniyor, yoksa her istemci güncellemesi güvenilen bütün tool'ları gizlerdi; sonra değişirse tool
+    değişmiş sayılıyor. Tanımın tamamını tek hash'le saklayan eski pinler, aynı tanım görülünce kendiliğinden yeni
+    biçime geçiyor. Şemasız bir istemcinin gördüğü değişiklik onaylanınca sabitlenmiş şema korunuyor. Bilinen sınır:
+    yeni sürümün tanımıyla alınmış eski biçimli bir pin, ilk oturum eski sürümle açılırsa taşınamıyor ve bir kez onay
+    istiyor. GitHub kurulumunda 47 pin taşındı; iki sürümde de 45 tool görünüyor ve `onChange` yeniden `hide`.
+52. **Açık: `server/discover` el sıkışma sayılmıyordu.** Firewall yalnızca `initialize` yanıtını el sıkışma olarak
+    işliyordu. 2026-07-28'de sunucu talimatları (`instructions`, GitHub'da 1.802 karakter) taranmadan modele gidiyor,
+    sunucu kodu kontrolü hiç çalışmıyordu. Artık iki yanıt da aynı kontrollerden geçiyor.
+53. **Model yükleme zamanı:** model sunucudan önce yükleniyordu; yükleme olay döngüsünü tek seferde yaklaşık 2,2
+    saniye durduruyor (toplam 2,7–5,1 sn). Claude Code'un sürüm yoklaması bu sürede zaman aşımına uğruyor, istemci
+    `initialize`'a düşüp yeniden `server/discover` deniyor ya da sunucuyu yeniden başlatıp eski sürümle bağlanıyordu.
+    Artık sunucu hemen başlıyor ve model, el sıkışma yanıtı gönderildikten sonra (ondan önce bir tarama gerekirse o
+    anda) yükleniyor; modeli gereken taramalar bekliyor. Model klasörü yoksa firewall yine başlamadan duruyor.
+    El sıkışma 5,8 sn'den 0,55–1,1 sn'ye indi (Docker tek başına 0,4 sn).
+54. **JSON'a duyarlı ML metni:** tool sonucu JSON tutan bir metinse sınıflandırıcı ham JSON'u değil içindeki
+    değerleri ve alan adına benzemeyen anahtarları okuyor. Verinin içinde protokolün `image`, `blob` ve `_meta`
+    atlamaları uygulanmıyor, yoksa saldırgan metnini bu alanlara saklayabilirdi. Gerçek modelle: engellenen commit
+    0,994 → 0,008; insan ortak yazarlı mesaj 0,998 → 0,009; Türkçe sıradan mesaj 0,009; "Add prompt template
+    pinning" 1,000 → 0,996 (hâlâ engelleniyor, zor negatif gerekiyor); 5 sentetik saldırı 1,000'de kaldı. Firewall
+    üzerinden `list_commits` artık geçiyor (85/85 test).

@@ -18,11 +18,11 @@ Host ──stdio──► mcp-firewall ──stdio──► Gerçek MCP server
 | Path traversal, komut enjeksiyonu | Argüman bazlı `deny` / `allow` regex'leri, `"*"` ile tüm iç içe değerler |
 | Tool poisoning | `descriptionScan`: açıklama, şema değerleri **ve parametre adları** içinde injection kalıpları ve gizli Unicode/ANSI |
 | Full-schema poisoning | Parametre adları (`readSshKey` → "read ssh key") regex ve ML taramasına dahil |
-| Zehirli sunucu talimatları, prompt/resource listeleri | `initialize.instructions`, `prompts/list`, `resources/list`, `resources/templates/list` taranır; zehirli olan çıkarılır |
+| Zehirli sunucu talimatları, prompt/resource listeleri | `initialize` ve `server/discover` (MCP 2026-07-28) yanıtlarındaki `instructions`, `prompts/list`, `resources/list`, `resources/templates/list` taranır; zehirli olan çıkarılır |
 | Zehirli prompt şablonu | `prompts/get` sonucu tanım desenleri ve gizli karakter kontrolünden geçer, eşleşen reddedilir; ML bulgusu varsayılan olarak yalnızca uyarıdır (`ml.scan.promptResults`) |
-| Rug pull | `pinning`: tool tanımlarının SHA-256 hash'i (TOFU), değişen tanım gizlenir |
+| Rug pull | `pinning`: tool tanımlarının SHA-256 hash'i (TOFU), değişen tanım gizlenir; çıktı şeması ayrı hash'lendiği için pin her MCP sürümünde tutar |
 | Prompt şablonu rug pull'u | `pinning.prompts`: şablon, argüman değerleri çıkarılarak hash'lenir; onaydan sonra değişen şablon reddedilir |
-| Paket rug pull'u (postmark-mcp) | `pinning.serverCode`: npx paketinin / yerel script'in dosyaları hash'lenir; kod değişince sunucu `initialize`'da kesilir |
+| Paket rug pull'u (postmark-mcp) | `pinning.serverCode`: npx paketinin / yerel script'in dosyaları hash'lenir; kod değişince sunucu el sıkışmada (`initialize` / `server/discover`) kesilir |
 | İlk günden zehirli / sonradan eklenen tool | `pinning.onNew: hide`: yeni tool onaylanana kadar gizli |
 | Sunucular arası tool gölgeleme | `pinning.onNameCollision`: başka sunucunun da sunduğu tool adı uyarılır veya gizlenir |
 | Hata mesajıyla zehirleme (ATPA) | JSON-RPC `error` yanıtları da DLP, gizli karakter ve ML taramasından geçer |
@@ -95,14 +95,21 @@ node dist/src/cli.js pins approve --name mail --policy policy.yaml
 Tool adları verilirse yalnızca onlar onaylanır. Sunucu kodunun girdisi `@server-code`, prompt şablonlarınınki
 `@prompt:<ad>#<argümanlar>` biçimindedir (ör. `@prompt:review#code,language`).
 
+**Tool pinleri ve MCP sürümleri:** MCP 2026-07-28 ile bağlanan istemcilere (ör. Claude Code 2.1.309) aynı sunucu
+her tool'u bir çıktı şemasıyla (`outputSchema`) gönderebilir; eski sürümde bu alan yoktur. Bu yüzden pin iki
+parçalıdır: tanımın hash'i (çıktı şeması hariç) ve varsa `+` ile çıktı şemasının hash'i. Şemayı almayan istemcide
+yalnızca tanım karşılaştırılır. Şema ilk görüldüğünde `onNew: hide` olsa bile sabitlenir, yoksa her istemci
+güncellemesi güvenilen bütün tool'ları gizlerdi; sonra değişirse tool değişmiş sayılır. Tanımın tamamını tek hash'le
+saklayan eski pinler, aynı tanım görüldüğünde kendiliğinden yeni biçime geçer.
+
 **Sunucu kodu sabitleme:** şunlar hash'lenir:
 - `npx`/`npm exec`/`pnpm dlx`/`bunx` ile çalışan paketlerin npx önbelleğindeki dosyaları;
 - `uvx`/`uv tool run`/`pipx run` ile çalışan Python paketlerinin, wheel `RECORD` dosyasında listelenen dosyaları
   (yalnızca o paket; bağımlılıklar, `.pyc` ve başlatıcılar hariç). Paket uv önbelleğinde (`archive-v0`),
   `uv tool` dizininde, pipx `venvs` ve önbellek dizinlerinde aranır; `UV_CACHE_DIR`, `UV_TOOL_DIR`, `PIPX_HOME` dikkate alınır;
 - komut satırındaki yerel script'lerin paketi (`package.json`/`pyproject.toml` olan en yakın dizin);
-  `node_modules`, `.git`, `.venv` atlanır. Hash, sunucu `initialize`'a cevap verdiğinde (npx kurulumu bittikten sonra)
-alınır. Kod değiştiyse istemciye hata döner ve o oturumda sunucuya hiçbir mesaj iletilmez. Sürümü sabitlenmemiş paketler
+  `node_modules`, `.git`, `.venv` atlanır. Hash, sunucu el sıkışmaya (`initialize` veya `server/discover`) ilk cevap
+verdiğinde (npx kurulumu bittikten sonra) alınır. Kod değiştiyse istemciye hata döner ve o oturumda sunucuya hiçbir mesaj iletilmez. Sürümü sabitlenmemiş paketler
 (`npx -y paket` gibi) için uyarı yazılır: güncellemeler incelenmeden kurulur. Otomatik bulunamayan sunucular
 (ör. doğrudan PATH'ten çalışan kurulu araçlar, derlenmiş ikili dosyalar, `python -m paket`) için `--code <yol>` ile
 kod dizini verilebilir.
@@ -160,6 +167,9 @@ node dist/src/cli.js dashboard --audit demo/audit.jsonl
 
 Kurallar kesin ihlalleri yakalar; kalıba uymayan prompt injection'lar için yerel bir ONNX modeli çalışır.
 Model proxy sürecinin içinde, CPU'da ve internete çıkmadan çalışır (`allowRemoteModels = false`).
+Yüklenirken olay döngüsünü birkaç saniye durdurduğu için model, el sıkışma yanıtı istemciye gönderildikten sonra
+yüklenir (protokol sürümünü yoklayan istemciler o kadar beklemez); ondan önce taranacak bir şey gelirse tarama
+modeli bekler. Model klasörü yoksa firewall hiç başlamaz.
 
 ```
 Mesaj ─► Katman 1: kurallar, DLP, pinning ─► Katman 2: ML (tool tanımları + tool sonuçları) ─► Host
@@ -171,6 +181,11 @@ Mesaj ─► Katman 1: kurallar, DLP, pinning ─► Katman 2: ML (tool tanımla
   sunucularda `ml.scan.toolDefinitions: off` kullanın; tanımlar pin, desen ve gizli karakter kontrolüyle korunmaya
   devam eder.
 - **Tool sonuçları:** `tools/call` ve `resources/read` sonuçları DLP'den sonra skorlanır (dolaylı injection).
+  Sonuç JSON tutan bir metinse model ham JSON'u değil içindeki değerleri (ve alan adına benzemeyen anahtarları)
+  okur: GitHub'ın commit listesi ham hâliyle 0,994 alıp engelleniyordu, değerleriyle 0,008. Prompt injection'ı
+  *anlatan* zararsız içerik yine de engellenebilir: bu deponun README'si ve testleri (gerçek saldırı örnekleri
+  içeriyor) ve konusu prompt olan commit mesajları ("Add prompt template pinning" 0,996). Güvenlik konulu depoların
+  geçmişini yerel git ile okuyun.
 - **Prompt şablonları (`prompts/get`):** tanım desenleri ve gizli karakter kontrolü engeller; model varsayılan olarak
   yalnızca uyarır (`ml.scan.promptResults: warn`). Rol istemleri ("Act as…") tasarım gereği modele verilmiş
   talimattır ve model onları saldırıdan ayıramıyor (aşağıda "Rol istemleri ve `prompts/get`"). Şablon onaydan

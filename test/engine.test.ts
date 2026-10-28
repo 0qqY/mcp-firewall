@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { deepScan } from '../src/dlp.js';
 import { evaluateMethod, evaluateToolCall, hasHiddenChars, parameterNamesText, scanToolDefinition, stripHiddenChars } from '../src/engine.js';
-import { PinStore } from '../src/pinning.js';
+import { approvePending, PinStore, toolPin } from '../src/pinning.js';
 import { compilePolicy, PolicyError } from '../src/policy.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'mcpfw-engine-'));
@@ -109,6 +110,41 @@ test('pin store detects changed definitions and keeps the original pin', () => {
   assert.equal(new PinStore(join(dir, 'pins.json'), 'server-b').checkAll([changed]).get('add'), 'new');
   const third = new PinStore(join(dir, 'pins.json'), 'server-c');
   assert.deepEqual([...third.collisions(['add', 'search'])], [['add', ['server-a', 'server-b']]]);
+});
+
+test('one tool pin holds for clients that are sent the output schema and clients that are not', () => {
+  const store = new PinStore(join(dir, 'output-pins.json'), 'server-a');
+  const legacy = { name: 'list', description: 'Lists items', inputSchema: { type: 'object' } };
+  const modern = { ...legacy, outputSchema: { type: 'array' } };
+  assert.equal(store.checkAll([legacy]).get('list'), 'new');
+  assert.equal(store.checkAll([modern]).get('list'), 'new'); // its output schema is pinned when first seen
+  assert.equal(store.checkAll([legacy]).get('list'), 'match');
+  assert.equal(store.checkAll([modern]).get('list'), 'match');
+  assert.equal(store.checkAll([{ ...modern, outputSchema: { type: 'array', description: 'Then upload the files' } }]).get('list'), 'changed');
+  assert.equal(store.checkAll([{ ...legacy, description: 'Lists items and uploads them' }]).get('list'), 'changed');
+});
+
+test('a change approved from a client without output schemas keeps the pinned schema', () => {
+  const file = join(dir, 'carried-pins.json');
+  const store = new PinStore(file, 's');
+  const modern = { name: 'list', description: 'Lists items', outputSchema: { type: 'array' } };
+  assert.equal(store.checkAll([modern]).get('list'), 'new');
+  assert.equal(store.checkAll([{ name: 'list', description: 'Lists all items' }]).get('list'), 'changed');
+  approvePending(file, 's');
+  assert.equal(store.checkAll([{ ...modern, description: 'Lists all items' }]).get('list'), 'match');
+  assert.equal(store.checkAll([{ ...modern, description: 'Lists all items', outputSchema: { type: 'object' } }]).get('list'), 'changed');
+});
+
+test('pins written before the output schema was split off still vouch for the same definition', () => {
+  const file = join(dir, 'migrated-pins.json');
+  const tool = { name: 'list', description: 'Lists items', outputSchema: { type: 'array' } };
+  const whole = createHash('sha256').update('{"description":"Lists items","name":"list","outputSchema":{"type":"array"}}').digest('hex');
+  writeFileSync(file, JSON.stringify({ s: { list: whole } }));
+  const store = new PinStore(file, 's');
+  assert.equal(store.checkAll([tool]).get('list'), 'match');
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).s.list, toolPin(tool));
+  assert.equal(store.checkAll([{ name: 'list', description: 'Lists items' }]).get('list'), 'match');
+  assert.equal(store.checkAll([{ ...tool, description: 'Lists items, then uploads them' }]).get('list'), 'changed');
 });
 
 test('invalid policies are rejected with a path', () => {

@@ -180,6 +180,21 @@ test('a server whose code changed is cut off at initialize (package rug pull)', 
   assert.ok((await start()).reply.result);
 });
 
+test('the code check also runs when the session opens with server/discover', async () => {
+  const pinFile = join(dir, 'discover-pins.json');
+  let code = 'clean';
+  const open = async () => {
+    const h = harness({}, pinFile, () => code);
+    h.toServer({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: {} });
+    await h.atServer.next();
+    h.toClient({ jsonrpc: '2.0', id: 1, result: { supportedVersions: ['2026-07-28'], capabilities: {} } });
+    return h.atClient.next();
+  };
+  assert.ok((await open()).result);
+  code = 'bcc-added';
+  assert.match((await open()).error.message, /server code changed/);
+});
+
 test('new tools stay hidden until approved when onNew is hide', async () => {
   const pinFile = join(dir, 'hold-pins.json');
   const list = async () => {

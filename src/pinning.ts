@@ -5,7 +5,7 @@ import { isObject, type JsonObject } from './jsonrpc.js';
 
 export type PinStatus = 'new' | 'pending' | 'match' | 'changed';
 
-/** server id -> tool name -> sha256 of the tool definition */
+/** server id -> tool name -> pin of the tool (toolPin) */
 type PinFile = Record<string, Record<string, string>>;
 
 /** Pin-file key under which a server's code fingerprint is stored; '@' cannot start an npm-style tool name. */
@@ -31,10 +31,27 @@ function canonicalJson(v: unknown): string {
   return JSON.stringify(v);
 }
 
-/** Hashes everything the model sees about a tool; `_meta` is transport bookkeeping and excluded. */
+const sha256 = (value: unknown): string => createHash('sha256').update(canonicalJson(value)).digest('hex');
+
+/** Hashes everything the model sees about a tool but its output schema; `_meta` is transport bookkeeping and excluded. */
 export function hashTool(tool: JsonObject): string {
+  const { _meta, outputSchema, ...definition } = tool;
+  return sha256(definition);
+}
+
+/**
+ * A tool's pin: its definition hash, plus `+` and the hash of its output schema when it has one. The
+ * output schema is pinned apart because protocol versions disagree on sending it (2026-07-28 adds one
+ * to every tool of the same server), and one pin has to hold for clients on either version.
+ */
+export function toolPin(tool: JsonObject): string {
+  return tool.outputSchema === undefined ? hashTool(tool) : `${hashTool(tool)}+${sha256(tool.outputSchema)}`;
+}
+
+/** The pin written before the output schema was split off: one hash over the whole definition. */
+function legacyToolPin(tool: JsonObject): string {
   const { _meta, ...definition } = tool;
-  return createHash('sha256').update(canonicalJson(definition)).digest('hex');
+  return sha256(definition);
 }
 
 /**
@@ -107,21 +124,41 @@ export class PinStore {
     let dirty = false;
     for (const tool of tools) {
       const name = String(tool.name ?? '');
-      const hash = hashTool(tool);
+      const pin = toolPin(tool);
       const pinned = server[name];
-      if (pinned === hash) {
+      if (!pinned) {
+        if (holdNew) {
+          result.set(name, 'pending');
+          pending[name] = pin;
+        } else {
+          server[name] = pin;
+          result.set(name, 'new');
+          dirty = true;
+        }
+        continue;
+      }
+      const [definition, output] = pin.split('+');
+      const [pinnedDefinition, pinnedOutput] = pinned.split('+');
+      if (pinned === pin || (pinnedDefinition === definition && output === undefined)) {
         result.set(name, 'match');
         settled.push(name);
-      } else if (pinned) {
-        result.set(name, 'changed');
-        pending[name] = hash;
-      } else if (holdNew) {
-        result.set(name, 'pending');
-        pending[name] = hash;
-      } else {
-        server[name] = hash;
+      } else if (pinnedDefinition === definition && pinnedOutput === undefined) {
+        // The first output schema of a pinned tool, sent to a client on a newer protocol version. Pinned
+        // even when new tools are held: holding it would hide every trusted tool after a client upgrade.
+        server[name] = pin;
         result.set(name, 'new');
+        settled.push(name);
         dirty = true;
+      } else if (pinned === legacyToolPin(tool)) {
+        // Pinned before the output schema was split off, and the definition is the same.
+        server[name] = pin;
+        result.set(name, 'match');
+        settled.push(name);
+        dirty = true;
+      } else {
+        result.set(name, 'changed');
+        // A client that is not sent the output schema cannot vouch for a new one, so the pinned one stays.
+        pending[name] = output === undefined && pinnedOutput !== undefined ? `${definition}+${pinnedOutput}` : pin;
       }
     }
     if (dirty) {

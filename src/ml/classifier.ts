@@ -69,17 +69,53 @@ export async function scoreTexts(classifier: Classifier, texts: string[], opts: 
   return results;
 }
 
-/** Collects the human-readable text of a JSON value, skipping binary payloads and duplicates. */
-export function extractText(value: unknown): string {
+/** Object keys that name a field. Other keys (spaces, punctuation, over 40 characters) are text the model scan reads. */
+const FIELD_NAME = /^[A-Za-z_$][\w$.-]{0,39}$/;
+
+/** The JSON object or array a string holds, or undefined when it holds anything else. */
+function parseContainer(text: string): unknown {
+  const t = text.trim();
+  if (!t.startsWith('{') && !t.startsWith('[')) return undefined;
+  try {
+    return JSON.parse(t);
+  } catch {
+    return undefined;
+  }
+}
+
+function collectText(value: unknown, readJson: boolean): string {
   const parts = new Set<string>();
-  const walk = (v: unknown): void => {
-    if (typeof v === 'string') parts.add(v);
-    else if (Array.isArray(v)) v.forEach(walk);
+  // `inData`: inside JSON a string held, where the protocol's binary and `_meta` fields mean nothing.
+  const walk = (v: unknown, inData: boolean): void => {
+    if (typeof v === 'string') {
+      const data = readJson ? parseContainer(v) : undefined;
+      if (data === undefined) parts.add(v);
+      else walk(data, true);
+    } else if (Array.isArray(v)) v.forEach((x) => walk(x, inData));
     else if (isObject(v)) {
-      if (v.type === 'image' || v.type === 'audio') return;
-      for (const [key, x] of Object.entries(v)) if (key !== 'blob' && key !== '_meta') walk(x);
+      if (!inData && (v.type === 'image' || v.type === 'audio')) return;
+      for (const [key, x] of Object.entries(v)) {
+        if (!inData && (key === 'blob' || key === '_meta')) continue;
+        if (readJson && !FIELD_NAME.test(key)) parts.add(key);
+        walk(x, inData);
+      }
     }
   };
-  walk(value);
+  walk(value, false);
   return [...parts].join('\n');
+}
+
+/** Collects the human-readable text of a JSON value, skipping binary payloads and duplicates. */
+export function extractText(value: unknown): string {
+  return collectText(value, false);
+}
+
+/**
+ * The text the classifier reads from a message: like extractText, but a string holding a JSON object or
+ * array is read as its values, plus any key that is not a plain field name, instead of as raw JSON.
+ * Benign API responses (a commit list, an issue) scored as injections on their JSON syntax and
+ * metadata. Neighbouring values stay on adjacent lines, so text split across fields is read together.
+ */
+export function extractMlText(value: unknown): string {
+  return collectText(value, true);
 }

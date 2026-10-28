@@ -26,7 +26,7 @@ import {
   type JsonObject,
   type JsonRpcMessage,
 } from './jsonrpc.js';
-import { extractText, scoreTexts, type Classifier } from './ml/classifier.js';
+import { extractMlText, extractText, scoreTexts, type Classifier } from './ml/classifier.js';
 import { hashPromptTemplate, promptPinKey, type PinStatus, type PinStore } from './pinning.js';
 import type { Policy } from './policy.js';
 
@@ -42,6 +42,12 @@ const DEFINITION_LISTS: Record<string, string> = {
 
 /** Server-initiated requests that put server-written text in front of the model or the user. */
 const SERVER_PROMPTS = new Set(['sampling/createMessage', 'elicitation/create']);
+
+/**
+ * Responses that open a session and carry the server's instructions: `initialize`, and `server/discover`
+ * from protocol 2026-07-28 on, which a client may send instead of initialize or besides it.
+ */
+const HANDSHAKES = new Set(['initialize', 'server/discover']);
 
 export interface ProxyStreams {
   clientIn: Readable;
@@ -99,6 +105,8 @@ export class FirewallProxy {
   /** Set when the server's code failed its pin check: from then on nothing passes in either direction. */
   private serverBlocked?: string;
   private codeChecked = false;
+  /** The model, from the first loadModel call on. */
+  private model?: Promise<Classifier>;
   /** Sampling usage this session: start times of the last minute's requests, request and token totals. */
   private readonly samplingUse = { recent: [] as number[], requests: 0, tokens: 0 };
   /** Clock for the sampling rate window; tests replace it. */
@@ -109,8 +117,12 @@ export class FirewallProxy {
     private readonly audit: AuditLog,
     private readonly pins: PinStore | undefined,
     private readonly io: ProxyStreams,
-    private readonly classifier?: Classifier,
-    /** Fingerprints the server's code; called once, when the server answers initialize (npx has installed it by then). */
+    /**
+     * The model, or a loader for it. Loading blocks the event loop for seconds, so the loader is called
+     * once the handshake has been answered, or earlier by the first scan that needs the model.
+     */
+    private readonly classifier?: Classifier | (() => Promise<Classifier>),
+    /** Fingerprints the server's code; called once, when the server answers the handshake (npx has installed it by then). */
     private readonly serverCode?: () => CodeFingerprint,
   ) {}
 
@@ -128,6 +140,11 @@ export class FirewallProxy {
 
   private get enforcing(): boolean {
     return this.policy.mode === 'enforce';
+  }
+
+  private loadModel(): Promise<Classifier> {
+    const classifier = this.classifier!;
+    return (this.model ??= typeof classifier === 'function' ? classifier() : Promise.resolve(classifier));
   }
 
   /** Records a policy violation; returns true when the message must actually be stopped. */
@@ -210,6 +227,7 @@ export class FirewallProxy {
 
   private async fromServer(msg: JsonRpcMessage): Promise<void> {
     const direction = 'server->client';
+    let handshake = false;
     if (typeof msg.method === 'string') {
       // Server-initiated request or notification (sampling, elicitation, list_changed...).
       const decision = evaluateMethod(this.policy, msg.method);
@@ -232,9 +250,10 @@ export class FirewallProxy {
     } else if (isResponse(msg)) {
       const request = this.pending.get(idKey(msg.id));
       this.pending.delete(idKey(msg.id));
-      if (request?.method === 'initialize' && !this.codeChecked) {
+      handshake = request !== undefined && HANDSHAKES.has(request.method);
+      if (request && handshake && !this.codeChecked) {
         this.codeChecked = true;
-        this.serverBlocked = this.checkServerCode();
+        this.serverBlocked = this.checkServerCode(request.method);
         if (this.serverBlocked) {
           send(this.io.clientOut, errorResponse(msg.id, this.serverBlocked));
           return;
@@ -243,23 +262,25 @@ export class FirewallProxy {
       if (request && isObject(msg.result)) {
         if (request.method === 'tools/list') msg.result = await this.filterToolsList(msg.result);
         else if (request.method in DEFINITION_LISTS) msg.result = await this.filterDefinitions(msg.result, request.method);
-        else if (request.method === 'initialize') msg.result = await this.inspectInstructions(msg.result);
+        else if (handshake) msg.result = await this.inspectInstructions(msg.result, request.method);
         else if (SCANNED_RESULTS.has(request.method)) msg = await this.inspectResult(msg, request);
       } else if (request && msg.error !== undefined) {
         msg = await this.inspectError(msg, request);
       }
     }
     send(this.io.clientOut, msg);
+    // A client probing the protocol version stops waiting after a while, so the model loads only now.
+    if (handshake && this.classifier) setImmediate(() => void this.loadModel().catch(() => undefined));
   }
 
   /**
    * Package rug pull: the server's code changed since it was pinned while its tool definitions may
    * be identical. Returns the reason when the server must not be used.
    */
-  private checkServerCode(): string | undefined {
+  private checkServerCode(method: string): string | undefined {
     const { serverCode } = this.policy.pinning;
     if (!this.pins || !this.serverCode || serverCode === 'off') return undefined;
-    const ctx: Context = { direction: 'server->client', method: 'initialize', tool: '(server code)' };
+    const ctx: Context = { direction: 'server->client', method, tool: '(server code)' };
     let fp: CodeFingerprint;
     try {
       fp = this.serverCode();
@@ -356,7 +377,7 @@ export class FirewallProxy {
 
     const action = isPrompt ? ml.scan.promptResults : ml.scan.toolResults;
     if (this.classifier && action !== 'off') {
-      const reason = await this.mlVerdict(extractText(msg.result), ctx, action);
+      const reason = await this.mlVerdict(extractMlText(msg.result), ctx, action);
       if (reason) return refuse(reason);
     }
     return msg;
@@ -382,17 +403,17 @@ export class FirewallProxy {
     msg.error = hidden.value;
 
     if (this.classifier && ml.scan.toolResults !== 'off') {
-      const reason = await this.mlVerdict(extractText(msg.error), ctx, ml.scan.toolResults);
+      const reason = await this.mlVerdict(extractMlText(msg.error), ctx, ml.scan.toolResults);
       if (reason) return refuse(reason);
     }
     return msg;
   }
 
-  /** Server `instructions` from initialize go straight into the model's context; poisoned ones are dropped. */
-  private async inspectInstructions(result: JsonObject): Promise<JsonObject> {
+  /** Server `instructions` from the handshake go straight into the model's context; poisoned ones are dropped. */
+  private async inspectInstructions(result: JsonObject, method: string): Promise<JsonObject> {
     if (typeof result.instructions !== 'string' || !result.instructions.trim()) return result;
-    const ctx: Context = { direction: 'server->client', method: 'initialize', tool: '(server instructions)' };
-    const [screening] = await this.screenDefinitions([result.instructions], 'initialize');
+    const ctx: Context = { direction: 'server->client', method, tool: '(server instructions)' };
+    const [screening] = await this.screenDefinitions([result.instructions], method);
     if (screening.hide.length === 0) return result;
     if (!this.violation({ ...ctx, score: screening.score, excerpt: screening.excerpt }, `server instructions removed: ${screening.hide.join('; ')}`)) return result;
     const { instructions: _dropped, ...rest } = result;
@@ -446,7 +467,7 @@ export class FirewallProxy {
 
     const { ml } = this.policy;
     if (!this.classifier || ml.scan.serverRequests === 'off') return undefined;
-    return this.mlVerdict(extractText(msg.params), ctx, ml.scan.serverRequests);
+    return this.mlVerdict(extractMlText(msg.params), ctx, ml.scan.serverRequests);
   }
 
   /** Runs the classifier on one text; returns the refusal reason when the message must be stopped. */
@@ -512,7 +533,7 @@ export class FirewallProxy {
   private async mlFlags(texts: string[], ctx: Context): Promise<(MlFlag | undefined)[]> {
     const { ml, decoding } = this.policy;
     try {
-      const scores = await scoreTexts(this.classifier!, decoding.enabled ? texts.map(withDecoded) : texts, ml);
+      const scores = await scoreTexts(await this.loadModel(), decoding.enabled ? texts.map(withDecoded) : texts, ml);
       return scores.map((s) => {
         if (s.score >= ml.threshold) {
           return { reason: `ML classifier flagged possible prompt injection (score ${s.score.toFixed(3)})`, score: s.score, excerpt: s.excerpt };
