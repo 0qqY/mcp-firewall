@@ -194,3 +194,20 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     0,994 → 0,008; insan ortak yazarlı mesaj 0,998 → 0,009; Türkçe sıradan mesaj 0,009; "Add prompt template
     pinning" 1,000 → 0,996 (hâlâ engelleniyor, zor negatif gerekiyor); 5 sentetik saldırı 1,000'de kaldı. Firewall
     üzerinden `list_commits` artık geçiyor (85/85 test).
+
+## K. Gerçek MCP testleri ve DLP açığı (29.10.2026)
+
+55. **Doğru-pozitif senaryo (`demo/toxic-agent-flow`):** GitHub "toxic agent flow" saldırısını taklit eden
+    kendi kendine yeten bir mock sunucu. Bir issue gövdesine gömülü dolaylı injection firewall arkasında 1,000
+    skorla engellendi; zararsız issue geçti. Deterministik (modelsiz) sürümü `test/ml.test.ts` içinde.
+56. **Dosya sistemi ve web testleri (`demo/filesystem`, `demo/web`):** resmî `@modelcontextprotocol/server-filesystem`
+    ve gerçek `fetch` yapan küçük bir sunucu firewall arkasında denendi. İkisinde de gömülü injection 1,000 ile
+    engellendi, zararsız içerik geçti. Windows'ta uzun checkout yolu `npx`/`node`'u başlatamadığı için demolar
+    çocuk süreci kısa bir cwd'de (os.tmpdir) başlatıyor.
+57. **DLP açığı ve düzeltmesi:** dosya sistemi testinde `config.env` okunurken DLP'nin `aws_access_key` detektörünün
+    yalnızca `AKIA…` erişim anahtarı kimliğini maskelediği, 40 karakterlik AWS gizli anahtar değerini kaçırdığı
+    görüldü; o değeri yalnızca ML "injection" olarak (0,988) yakalıyordu — yani ML kapalı/`warn` olsa gizli anahtar
+    modele giderdi. Çözüm: bağlamsal `aws_secret_key` detektörü; değer `(aws_)secret_access_key` etiketinden sonra
+    (`=`/`:`, tırnak toleranslı) geldiğinde maskeleniyor, çıplak 40 karakterlik base64 ise (ör. commit hash'i)
+    bırakılıyor. Anahtar adı görünür kalsın diye yalnızca değer redakte ediliyor (lookbehind). Artık `config.env`
+    DLP'de maskelenip geçiyor, ML'e muhtaç değil (87/87 test).

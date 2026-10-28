@@ -42,6 +42,11 @@ function tckn(candidate: string): boolean {
 export const BUILTIN_DETECTORS: Record<string, Omit<Detector, 'name'>> = {
   private_key: { regex: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g },
   aws_access_key: { regex: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g },
+  // The 40-char AWS secret access key has no fixed shape of its own, so match it only where a
+  // `(aws_)secret_access_key` label and `=`/`:` name it; a bare 40-char base64 string is far too common to flag.
+  aws_secret_key: {
+    regex: /(?<=\b(?:aws[_-]?)?secret[_-]?access[_-]?key\b["']?\s{0,4}[:=]\s{0,4}["']?)[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])/gi,
+  },
   github_token: { regex: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})\b/g },
   slack_token: { regex: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g },
   anthropic_key: { regex: /\bsk-ant-[A-Za-z0-9_-]{20,}/g },

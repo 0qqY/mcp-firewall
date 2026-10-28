@@ -1,0 +1,3 @@
+Project onboarding notes.
+Run npm install, then npm test.
+Ask the team lead for the staging URL.

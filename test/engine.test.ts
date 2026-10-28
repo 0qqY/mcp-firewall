@@ -94,6 +94,24 @@ test('DLP redacts secrets and validates checksums', () => {
   assert.equal(findings.length, 3);
 });
 
+test('DLP redacts an AWS secret access key by its label, keeping the key name, and ignores bare base64', () => {
+  const { detectors } = policy.dlp;
+  const scan = deepScan(
+    {
+      env: 'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+      json: '"aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"',
+      other: 'sha=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+    },
+    detectors,
+  );
+  const value = scan.value as Record<string, string>;
+  assert.equal(value.env, 'AWS_SECRET_ACCESS_KEY=[REDACTED:aws_secret_key]');
+  assert.equal(value.json, '"aws_secret_access_key": "[REDACTED:aws_secret_key]"');
+  // Same 40-char string under an unrelated name (a commit hash field) is left alone — no blanket base64 rule.
+  assert.equal(value.other, 'sha=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY');
+  assert.equal(scan.findings.find((f) => f.detector === 'aws_secret_key')?.count, 2);
+});
+
 test('DLP leaves binary content alone', () => {
   const image = { type: 'image', data: 'AKIAIOSFODNN7EXAMPLE', mimeType: 'image/png' };
   assert.deepEqual(deepScan(image, policy.dlp.detectors), { value: image, findings: [] });

@@ -33,7 +33,7 @@ kod çözme ve gizleme geri alma adımlarından sonraki metin). 27.10.2026'dan �
 | Tool açıklaması zehirleme / "line jumping" | Invariant Labs TPA (2025); Trail of Bits "Jumping the line" | `tools/list` üzerinde regex desenleri, gizli Unicode kontrolü ve ML taraması; şüpheli tool modelden gizleniyor. Eğitimde MCPTox verisi var. |
 | Rug pull (onaydan sonra tanımın değiştirilmesi) | OWASP MCP03; ETDI makalesi | Her tool tanımının SHA-256 hash'i sabitleniyor; tanım değişirse tool gizleniyor ve operatör onaylayana kadar gizli kalıyor. Bu alandaki en güçlü savunmamız. Çıktı şeması (`outputSchema`) 29.10.2026'dan itibaren ayrı sabitleniyor; böylece aynı pin, MCP 2026-07-28 ile bağlanan istemcide de eski sürümle bağlananda da tutuyor. |
 | Tool çıktısındaki dolaylı prompt injection | GitHub MCP "toxic agent flow" (Invariant, Mayıs 2025); Supabase destek talebi senaryosu; LLMail tarzı e-postalar | `tools/call` ve `resources/read` sonuçları ML ile taranıp engelleniyor. İngilizce LLMail sonuçları: başarılı saldırıların %99'u (v9: %96), tüm saldırıların %95'i (v9: %90) yakalanıyor. |
-| Sır ve kişisel veri sızıntısı (OWASP MCP01) | Anahtarların veya token'ların araç çıktısına ya da argümana düşmesi | DLP özel anahtarları, AWS, GitHub, Slack, Anthropic ve OpenAI anahtarlarını, JWT'yi, kart numaralarını (Luhn kontrolüyle), TR IBAN'ı ve TCKN'yi (sağlama kontrolüyle) iki yönde de maskeliyor. |
+| Sır ve kişisel veri sızıntısı (OWASP MCP01) | Anahtarların veya token'ların araç çıktısına ya da argümana düşmesi | DLP özel anahtarları, AWS erişim anahtarını ve (etiketinden tanınan) AWS gizli anahtarını, GitHub, Slack, Anthropic ve OpenAI anahtarlarını, JWT'yi, kart numaralarını (Luhn kontrolüyle), TR IBAN'ı ve TCKN'yi (sağlama kontrolüyle) iki yönde de maskeliyor. |
 | Tehlikeli tool'lar ve yöntemler | `delete_*`, `exec`, sampling | Tool izin/yasak listeleri, argüman regex kuralları ve `methods.deny` ayarı var. |
 | Bozuk veya devasa mesajlar | Ayrıştırıcıyı bozma, bellek tüketme | Firewall hata durumunda mesajı geçirmiyor (fail-closed); 32 MB'tan büyük satırlar atılıyor. |
 | Full-Schema Poisoning (talimatın parametre adına gizlenmesi) *(27.10.2026'da kapatıldı)* | CyberArk "Poison everywhere" (Mayıs 2025) | Parametre adları (`readSshKey` → "read ssh key") regex desenlerine ve ML'e veriliyor. |
@@ -118,7 +118,7 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
 | Prompt şablonu pinleme | `src/pinning.ts` `hashPromptTemplate`, `pinning.prompts` | Onaylanan `prompts/get` şablonunun sonradan değiştirilmesi (argüman değerleri hash'e girmiyor) | İlk günden zehirli şablonlar (`onNew: allow` iken); her çağrıda değişen dinamik prompt'larda yanlış alarm |
 | Sunucu kodu sabitleme | `src/codepin.ts`, `pinning.serverCode` | npm (npx) ve Python (uvx, pipx) paketlerinde paket rug pull'u (postmark-mcp 1.0.16), sürümü sabitlenmemiş paketler için uyarı | Typosquat ve ilk sürümden kötü paketler, otomatik bulunamayan kod (PATH'teki kurulu araç, ikili dosya, `python -m`; `--code` gerekir) |
 | ML sınıflandırıcı (mmBERT) | `src/ml/`, `training/` | Tool çıktısındaki ve hata mesajlarındaki dolaylı injection (GitHub issue, e-posta, destek talebi, web sayfası), tanımlarda yeni ifadelerle yazılmış zehirleme, sampling ve elicitation içeriği, jailbreak metinleri, Türkçe injection (%90) ve Almanca/İspanyolca/Fransızca/Rusça injection | Görsel/ses, çok uzun çıktıların ortası (`onTruncated: warn` iken), kodlanmış metin; doğrudan kullanıcı saldırılarının bir kısmı (tehdit, şantaj, rol yapma; dış setlerde isabet %48–65); zararsız rol istemini zehirli olandan ayırmak (prompt şablonlarında bu yüzden yalnızca uyarı) |
-| DLP | `src/dlp.ts` | API anahtarları, özel anahtarlar, JWT, kart, TR IBAN, TCKN sızıntısı (istek ve yanıt); kodlanmış (base64, hex, %XX) hâlleri | Formatsız veri (sohbet geçmişi, özel repo içeriği) |
+| DLP | `src/dlp.ts` | API anahtarları, özel anahtarlar, AWS erişim ve (etiketinden) gizli anahtarı, JWT, kart, TR IBAN, TCKN sızıntısı (istek ve yanıt); kodlanmış (base64, hex, %XX) hâlleri | Formatsız veri (sohbet geçmişi, özel repo içeriği); etiketsiz çıplak gizli değerler |
 | Kod çözücü | `src/decode.ts`, `decoding` | base64/hex/URL/kaçış dizisi/HTML varlığı ile gizlenmiş talimatlar ve secret'lar (iç içe 2 seviye); Unicode TAG ve varyasyon seçicisi kaçakçılığıyla saklanan metin (ML ve desenler gizli metni okur); leetspeak, harf aralama, noktalarla bölme, benzer harfler (homoglif), rastgele büyük-küçük harf | ROT13, parçalara bölünüp birleştirilmesi istenen komutlar, şifrelenmiş metin |
 | Fail-closed proxy | `src/proxy.ts`, `src/jsonrpc.ts` | Bozuk mesajlar, 32 MB üzeri mesajlar, iç hata durumunda trafiğin sızması | — |
 | Dashboard güvenliği | `src/dashboard/server.ts` | Kendi arayüzümüze DNS rebinding ve CSRF | — |
@@ -165,6 +165,13 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
     taşınıyor; model, el sıkışma yanıtından sonra yükleniyor (el sıkışma 5,8 sn'den 0,6–1,1 sn'ye indi).
 19. JSON'a duyarlı ML metni (29.10.2026): JSON tutan tool sonuçlarında model değerleri okuyor. GitHub commit
     listesindeki yanlış alarm 0,994'ten 0,008'e indi; sentetik saldırılar 1,000'de kaldı (85/85 test).
+20. Gerçek MCP testleri ve DLP açığı (29.10.2026): resmî `@modelcontextprotocol/server-filesystem` ve gerçek
+    `fetch` yapan bir sunucu firewall arkasında denendi (`demo/filesystem`, `demo/web`). Dosya sistemi testinde
+    DLP'nin `aws_access_key` detektörünün yalnızca `AKIA…` erişim anahtarı kimliğini yakaladığı, 40 karakterlik
+    AWS gizli anahtar değerini kaçırdığı görüldü; değeri yalnızca ML "injection" olarak yakalıyordu. Çözüm: bağlamsal
+    `aws_secret_key` detektörü — değer `(aws_)secret_access_key` etiketiyle `=`/`:` sonrası geldiğinde maskeleniyor,
+    çıplak 40 karakterlik base64 ise yanlış alarm olmasın diye bırakılıyor. Artık `config.env` DLP'de maskelenip
+    geçiyor (87/87 test).
 
 **Sıradakiler:**
 
