@@ -200,10 +200,13 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
 55. **Doğru-pozitif senaryo (`demo/toxic-agent-flow`):** GitHub "toxic agent flow" saldırısını taklit eden
     kendi kendine yeten bir mock sunucu. Bir issue gövdesine gömülü dolaylı injection firewall arkasında 1,000
     skorla engellendi; zararsız issue geçti. Deterministik (modelsiz) sürümü `test/ml.test.ts` içinde.
-56. **Dosya sistemi ve web testleri (`demo/filesystem`, `demo/web`):** resmî `@modelcontextprotocol/server-filesystem`
-    ve gerçek `fetch` yapan küçük bir sunucu firewall arkasında denendi. İkisinde de gömülü injection 1,000 ile
-    engellendi, zararsız içerik geçti. Windows'ta uzun checkout yolu `npx`/`node`'u başlatamadığı için demolar
-    çocuk süreci kısa bir cwd'de (os.tmpdir) başlatıyor.
+56. **Dosya sistemi, web ve SQL testleri (`demo/filesystem`, `demo/web`, `demo/sql`):** resmî
+    `@modelcontextprotocol/server-filesystem`, gerçek `fetch` yapan küçük bir sunucu ve yerleşik `node:sqlite`
+    ile bellek içi bir SQL sunucusu firewall arkasında denendi. Hepsinde gömülü injection 1,000 ile engellendi,
+    zararsız içerik geçti. SQL demosu üç katmanı birden gösteriyor: satırdaki injection (ML), satırdaki
+    GitHub token (DLP maskeler) ve `DROP TABLE` (salt-okunur politika, `query` tool'unun `sql` argümanını istek
+    tarafında reddeder). Windows'ta uzun checkout yolu `npx`/`node`'u başlatamadığı için demolar çocuk süreci
+    kısa bir cwd'de (os.tmpdir) başlatıyor.
 57. **DLP açığı ve düzeltmesi:** dosya sistemi testinde `config.env` okunurken DLP'nin `aws_access_key` detektörünün
     yalnızca `AKIA…` erişim anahtarı kimliğini maskelediği, 40 karakterlik AWS gizli anahtar değerini kaçırdığı
     görüldü; o değeri yalnızca ML "injection" olarak (0,988) yakalıyordu — yani ML kapalı/`warn` olsa gizli anahtar
