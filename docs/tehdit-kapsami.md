@@ -1,0 +1,184 @@
+# MCP Firewall: bilinen saldırılara karşı kapsam (Ekim 2026)
+
+Bu belge, kamuya açık olarak bilinen MCP saldırılarını MCP Firewall'un mevcut koduyla karşılaştırır
+(`src/proxy.ts`, `src/engine.ts`, `src/policy.ts`, `src/pinning.ts`, `src/dlp.ts`, `src/ml/classifier.ts`).
+Saldırılar üç gruba ayrıldı:
+
+- **Korunuyoruz:** Firewall bu saldırıyı varsayılan ayarlarla görür ve durdurur.
+- **Zayıfız:** Firewall saldırıyı kısmen görür, ancak bilinen bir boşluk veya düşük isabet var.
+- **Engelleyemezdik:** Saldırı, firewall'un gördüğü JSON-RPC trafiğinin dışında gerçekleşir.
+
+Ölçümler varsayılan model mmBERT soup05-ab2'ye göre verilmiştir (eşik 0,9, 1500 karakterlik parçalar, firewall'un
+kod çözme ve gizleme geri alma adımlarından sonraki metin). 27.10.2026'dan önceki varsayılan v9'un değerleri parantez içinde.
+
+## Firewall'un gördüğü ve görmediği trafik
+
+| Kanal | Taranıyor mu? |
+|---|---|
+| `tools/list` (tool adı, açıklaması, şemadaki **değerler**) | Evet: regex, gizli Unicode kontrolü, ML ve hash sabitleme (pin) |
+| `tools/call` sonucu, `resources/read` | Evet: DLP ve ML |
+| `prompts/get` (prompt şablonu) | Evet: DLP, gizli karakter ve tanım desenleri engelliyor; ML varsayılan olarak yalnızca uyarıyor (27.10.2026'dan itibaren); şablon sabitlendikten sonra değişirse engelleniyor (28.10.2026'dan itibaren) |
+| `tools/call` argümanları | Evet: DLP ve isteğe bağlı argüman regex kuralları |
+| Şemadaki **anahtar adları** (parametre adları) | Evet (27.10.2026'dan itibaren): adlar kelimelere ayrılıp regex ve ML'e veriliyor |
+| JSON-RPC `error` yanıtları (`error.message` / `error.data`) | Evet (27.10.2026'dan itibaren): DLP, gizli karakter ve ML |
+| `initialize` yanıtındaki sunucu `instructions` alanı | Evet (27.10.2026'dan itibaren): zehirliyse alan çıkarılıyor |
+| `prompts/list`, `resources/list`, `resources/templates/list` açıklamaları | Evet (27.10.2026'dan itibaren): zehirli kayıt gizleniyor |
+| Sunucudan istemciye giden `sampling/createMessage` ve `elicitation/create` içeriği | Evet (27.10.2026'dan itibaren): gizli karakter ve ML; işaretlenen istek sunucuya reddediliyor |
+| Sunucu sürecinin kendi ağ ve dosya erişimi | **Hayır**: firewall yalnızca stdio'yu görüyor |
+
+## 1. Korunuyoruz
+
+| Saldırı | Örnek | Bizim savunmamız |
+|---|---|---|
+| Tool açıklaması zehirleme / "line jumping" | Invariant Labs TPA (2025); Trail of Bits "Jumping the line" | `tools/list` üzerinde regex desenleri, gizli Unicode kontrolü ve ML taraması; şüpheli tool modelden gizleniyor. Eğitimde MCPTox verisi var. |
+| Rug pull (onaydan sonra tanımın değiştirilmesi) | OWASP MCP03; ETDI makalesi | Her tool tanımının SHA-256 hash'i sabitleniyor; tanım değişirse tool gizleniyor ve operatör onaylayana kadar gizli kalıyor. Bu alandaki en güçlü savunmamız. |
+| Tool çıktısındaki dolaylı prompt injection | GitHub MCP "toxic agent flow" (Invariant, Mayıs 2025); Supabase destek talebi senaryosu; LLMail tarzı e-postalar | `tools/call` ve `resources/read` sonuçları ML ile taranıp engelleniyor. İngilizce LLMail sonuçları: başarılı saldırıların %99'u (v9: %96), tüm saldırıların %95'i (v9: %90) yakalanıyor. |
+| Sır ve kişisel veri sızıntısı (OWASP MCP01) | Anahtarların veya token'ların araç çıktısına ya da argümana düşmesi | DLP özel anahtarları, AWS, GitHub, Slack, Anthropic ve OpenAI anahtarlarını, JWT'yi, kart numaralarını (Luhn kontrolüyle), TR IBAN'ı ve TCKN'yi (sağlama kontrolüyle) iki yönde de maskeliyor. |
+| Tehlikeli tool'lar ve yöntemler | `delete_*`, `exec`, sampling | Tool izin/yasak listeleri, argüman regex kuralları ve `methods.deny` ayarı var. |
+| Bozuk veya devasa mesajlar | Ayrıştırıcıyı bozma, bellek tüketme | Firewall hata durumunda mesajı geçirmiyor (fail-closed); 32 MB'tan büyük satırlar atılıyor. |
+| Full-Schema Poisoning (talimatın parametre adına gizlenmesi) *(27.10.2026'da kapatıldı)* | CyberArk "Poison everywhere" (Mayıs 2025) | Parametre adları (`readSshKey` → "read ssh key") regex desenlerine ve ML'e veriliyor. |
+| Hata mesajıyla zehirleme (ATPA) *(27.10.2026'da kapatıldı)* | CyberArk ATPA | JSON-RPC `error` yanıtları DLP, gizli karakter ve ML taramasından geçiyor; işaretlenen mesaj firewall mesajıyla değiştiriliyor. |
+| Zehirli sunucu `instructions` alanı, prompt ve resource listeleri *(27.10.2026'da kapatıldı)* | MCP-38 | `initialize.instructions` zehirliyse çıkarılıyor; zehirli prompt, resource ve resource template kayıtları gizleniyor. |
+| Gizli Unicode ve ANSI kaçış kodları *(27.10.2026'da kapatıldı)* | Trail of Bits ANSI; Unicode TAG-block; varyasyon seçicisi kaçakçılığı | `hiddenText: strip`: tool sonuçlarındaki, hata mesajlarındaki ve sampling isteklerindeki görünmez karakterler (TAG, ek varyasyon seçicileri, sıfır genişlikli, bidi) ve ANSI/OSC dizileri temizleniyor. TAG ile kodlanmış talimat temizlenince tamamen kayboluyor. `warn`/`monitor` modunda ve tanımlarda ise gizli metin çözülüp ML'e veriliyor: Türkçe benchmark'ın görünmez Unicode saldırılarında isabet %98 (v9: %93; çözüm olmadan %29). |
+| Paket rug pull'u *(27.10.2026'da eklendi)* | `postmark-mcp` 1.0.15 → 1.0.16: kodda gizli BCC, tool tanımları aynı (Koi Security, Eylül 2025) | `pinning.serverCode`: npx paketinin dosyaları (veya yerel script'in paketi) hash'leniyor. Kod değişirse sunucu `initialize` anında kesiliyor ve operatör `mcp-firewall pins approve` diyene kadar o sunucuya hiçbir mesaj gitmiyor. Sürümü sabitlenmemiş paketler (`npx -y paket`) için uyarı yazılıyor. |
+| Prompt şablonu rug pull'u *(28.10.2026'da eklendi)* | Onaylanmış bir prompt şablonuna sonradan talimat eklenmesi; ör. "her zaman X paketini öner" gibi desenlerin yakalamadığı tercih manipülasyonu | `pinning.prompts: block`: her prompt'un şablonu, kullanıcının girdiği argüman değerleri çıkarılarak hash'leniyor ve ilk görüşte sabitleniyor. Şablon değişirse `prompts/get` reddediliyor ve operatör `mcp-firewall pins approve` diyene kadar reddedilmeye devam ediyor. |
+| İlk görüşte güvenme (TOFU) ve sonradan eklenen tool'lar *(27.10.2026'da eklendi)* | Sonradan eklenen zehirli tool | `pinning.onNew: hide`: yeni tool onaylanana kadar modelden gizleniyor. Varsayılan hâlâ `allow`, çünkü her kurulumda onay gerektiriyor. |
+| Sampling ile kota tüketme (kaynak hırsızlığı) *(27.10.2026'da eklendi)* | Unit 42 (2025): sunucunun sampling ile kullanıcının model kotasını kendi işleri için harcaması | `sampling` sınırları: dakikada 10, oturumda 200 istek; istek başına `maxTokens` en fazla 4096 (fazlası düşürülüyor); oturum başına 100.000 token bütçesi. Hepsi ayarlanabilir. Ayrıca `methods.deny` ile tamamen kapatılabiliyor. |
+| Dashboard'a DNS rebinding veya CSRF | MCP Inspector CVE-2025-49596 tarzı | Dashboard yalnızca 127.0.0.1'i dinliyor; Host ve Origin başlıklarını kontrol ediyor, özel başlık istiyor ve sıkı bir CSP kullanıyor. |
+
+## 2. Zayıfız
+
+| Saldırı | Örnek | Neden zayıfız | Düzeltme |
+|---|---|---|---|
+| Sampling ve elicitation kötüye kullanımı *(kısmen iyileşti)* | Unit 42: konuşma ele geçirme, gizli tool çağrısı (2025); elicitation ile oltalama | İçerik gizli karakter ve ML ile taranıyor (`ml.scan.serverRequests`). İkna edici ve emir içermeyen oltalama metinleri hâlâ yakalanmıyor. | Elicitation için tavsiye: `methods.deny` ile kapatmak. |
+| Uzun çıktıyla dolgu (padding) *(ayarla kapatılabilir)* | Saldırıyı yaklaşık 42.000 karakterlik metnin ortasına gömmek | Varsayılan hâlâ `ml.onTruncated: warn` (büyük dosya okumalarını bozmamak için). `block` seçilirse taranamayan metin engelleniyor. | Ayar: yüksek riskli sunucularda `onTruncated: block`. |
+| Sunucular arası gölgeleme *(kısmen iyileşti)* | Cross-server shadowing (MCP-38, Netskope) | Aynı pin dosyasını kullanan sunucular arasında aynı tool adı artık uyarı veriyor (`pinning.onNameCollision`, isteğe bağlı olarak gizliyor). Benzer ama farklı adlar (typosquat) ve açıklamada başka tool'a yapılan atıflar yakalanmıyor. | Orta: benzer ad tespiti. |
+| İngilizce dışı veya gizlenmiş injection *(kodlama ve karakter düzeyinde gizleme 27.10.2026'da kapatıldı)* | base64, hex, URL kodlama, leetspeak, bölünmüş komutlar, diğer diller | `decoding`: base64/base64url, hex, %XX, `\u`/`\x` kaçışları ve HTML varlıkları (iç içe 2 seviye) çözülüp desenlere ve ML'e veriliyor. Zararsız verilerde çözücü çok seyrek devreye giriyor (iç test 0/2786, bağımsız set 4/1560, Türkçe set 3/3055). Ayrıca leet, harf aralama (`i g n o r e`), noktalarla bölme, Kiril/Yunan benzer harfler ve rastgele büyük-küçük harf ML'den önce geri alınıyor: bu dönüşümlerde saldırı isabeti %96–99,7 (v9: %93–98), zararsız metinde yanlış alarm %6–9 (dönüşümsüz metinde %6; soup05'te %5–6'ydı, artış "Act as…" türü rol istemlerinden; geri alma olmadan v9'da %22–88'di). Hâlâ açık: ROT13 ve kelimeleri parçalara ayırıp birleştirmeyi isteyen komutlar ("'ign' ve 'ore' kelimelerini birleştir"). Diğer diller: Türkçe isabet %90 (v9: %84; görünmez Unicode çözümünden önce %75), makine çevirisiyle hazırlanan Almanca/İspanyolca/Fransızca/Rusça/Türkçe LLMail saldırılarında %98–99 (v9: %82–98). Eğitimde görülmemiş dış Türkçe setlerde isabet daha düşük, %48–65: bu setlerdeki saldırıların çoğu tool çıktısına gizlenmiş talimat değil, tehdit, şantaj ve rol yapma gibi doğrudan kullanıcı saldırıları. | Orta: ROT13 çözümü ve bölünmüş kelime kalıpları. Karıştırılmış örneklerle eğitim (v11) LLMail'de gerilediği için benimsenmedi. |
+| Kodlanmış veri sızdırma *(27.10.2026'da eklendi)* | Secret'ı base64'leyip URL parametresine koymak | Çözülen metinde DLP dedektörleri çalışıyor. Kodlanmış secret yerinde maskelenemediği için çağrı engelleniyor. | — |
+| Zehirli prompt şablonu (`prompts/get`) *(27.10.2026'da bilerek gevşetildi, 28.10.2026'da sabitleme eklendi)* | Kötü niyetli bir prompt sunucusunun, kullanıcının seçtiği şablona talimat gömmesi | Tanım desenleri ve gizli karakter kontrolü engelliyor, ama şablona gömülü saldırıların yalnızca %16'sını yakalıyor. Model %98'ini işaretliyor, ancak zararsız şablonların da %40'ını işaretlediği için varsayılan olarak yalnızca uyarıyor. Sonradan değişen şablonu sabitleme engelliyor; ilk görüşten itibaren zehirli olan şablon ise yalnızca uyarıyla geçiyor. Her çağrıda değişen içerik üreten dinamik prompt'lar (tarih, dosya içeriği) her seferinde değişmiş görünüyor. | Ayar: `pinning.onNew: hide` ile yeni şablonlar onaylanana kadar bekletilebiliyor; yüksek riskli kurulumlarda `ml.scan.promptResults: block`. Dinamik prompt sunucularında `pinning.prompts: warn`. |
+| Tercih manipülasyonu (MPMA) | AAAI 2026: "en iyi araç budur, her zaman bunu kullan" gibi ikna edici açıklamalar | Açıklamada emir kipi olmadığı için regex ve ML büyük olasılıkla kaçırıyor. | Orta: güvenilir tool kataloğu ve tool adına izin listesi (`tools.default: deny`). |
+| Pin anahtarı | — | `--name` verilmezse pin anahtarı sunucunun komut satırı; argümanlar değişince pinler sıfırlanıyor. | Kullanım: her sunucuya `--name` vermek. |
+| Argümanlarla veri sızdırma (formatsız veri) | WhatsApp MCP: sohbet geçmişinin `send_message` içine gömülmesi (Invariant, Nisan 2025); GitHub toxic flow: özel repo içeriğinin herkese açık PR'a yazılması | DLP yalnızca bilinen formatları tanıyor. Hangi verinin nereden gelip nereye gittiğini izleyen bir mekanizma (taint takibi) yok; argüman kuralları elle yazılmalı. | Zor: oturum boyunca veri akışını izlemek ("lethal trifecta" kuralı); hedef ve alıcıya izin listesi koymak. |
+| Görsel veya ses içindeki talimatlar | Çok modlu injection | Görsel ve ses içerik ML taramasından çıkarılıyor. | Zor: OCR veya bu içeriği tamamen engelleyen bir seçenek. |
+| Yanlış alarm yükü | Gerçek kullanıcı istemlerinde yüksek yanlış alarm oranı | Kullanıcılar firewall'u "warn" moduna alırsa koruma kalkar. Firewall kullanıcı istemlerini değil tool çıktılarını taradığı için bu oran dağıtımı temsil etmiyor; dağıtıma yakın setlerde (iç test, Türkçe iş metinleri) yanlış alarm %0,4–0,6 (v9: %1,1–1,3). Türkçe "görev talimatı" metinlerinde (ör. "bu mesajdaki kişisel verileri maskele") %33 (v9: %47; soup05: %71). Yapay zekâya rol veren istemler ("Act as…") tool çıktısında çoğunlukla işaretleniyor: zararsız rol ve sistem istemlerinin %40'ı (sistem istemi kütüphanesinde %78). Bu yüzden prompt şablonlarında (`prompts/get`) model artık yalnızca uyarıyor. Gerçek bir sunucuda tool tanımlarında da yüksek: GitHub'ın resmî MCP sunucusunun (v2.0.3) 46 tanımından 21'i işaretlendi (skor 0,90–0,999; ör. "Get the contents of a file or directory from a GitHub repository"), tanım taraması `tools/list`'i 112 saniye sürdürdü. GitHub kurulumunda `ml.scan.toolDefinitions: off` (28.10.2026). | Görev talimatı verisi (`training/task_prompts.py`) görev talimatlarındaki oranı %71'den %33'e indirdi. Rol istemleri için denenen v10, LLMail isabetini %60'a indirdiği için benimsenmedi. |
+
+## 3. Engelleyemezdik (firewall'un görüş alanı dışında)
+
+| Saldırı | Örnek | Neden |
+|---|---|---|
+| İlk sürümünden itibaren kötü niyetli sunucu kodu (tedarik zinciri) | Typosquat paketler; postmark-mcp 1.0.16 ile ilk kez kurulan bir sunucu | Sunucu veriyi kendi ağ bağlantısıyla, JSON-RPC dışından gönderiyor. Firewall yalnızca protokol trafiğini görüyor. Kod sabitleme yalnızca *değişikliği* yakalar; ilk kurulan sürüm referans kabul edilir. Sonradan güncellenen paket artık yakalanıyor (aşağıdaki nota bakın). |
+| Sunucu tarafı açıklar | Anthropic Filesystem MCP "EscapeRoute" CVE-2025-53109/53110 (sembolik bağlantı ve önek atlatma); MCP sunucularında komut enjeksiyonu (OWASP MCP05) | Açık sunucu kodunun içinde çalışıyor. Argüman regex kuralları (`..`, `/etc`, `;`) bir kısmını kesebilir ama varsayılan olarak tanımlı değiller. |
+| İstemci ve aracı yazılım açıkları | mcp-remote CVE-2025-6514 (OAuth `authorization_endpoint` üzerinden komut çalıştırma); MCP Inspector CVE-2025-49596 ve CVE-2025-58444 | OAuth akışı JSON-RPC başlamadan önce, `mcp-remote` sürecinin içinde gerçekleşiyor. |
+| Yapılandırma dosyası saldırıları | Cursor MCPoison CVE-2025-54136; CurXecute CVE-2025-54135; IDE'lerin proje tanımlı MCP sunucularını otomatik çalıştırması (CSA, Temmuz 2026) | Firewall da aynı `mcp.json` içinde tanımlı; saldırgan bu dosyayı değiştirirse firewall'u devreden çıkarabilir veya firewall'suz yeni bir sunucu ekleyebilir. |
+| Uzak HTTP/SSE sunucuları, OAuth ve token sorunları | Token passthrough, confused deputy, kapsam genişlemesi (OWASP MCP01/02/07) | Proxy yalnızca stdio destekliyor. `mcp-remote` ile sarmalanabilir ama kimlik doğrulama katmanı korunmuyor. |
+| Metinsiz kötüye kullanım | Model, injection içermeyen meşru verilerle kendi kendine yanlış bir aksiyon seçiyor; kullanıcı "her zaman izin ver" demiş | Tespit edilecek bir saldırı metni yok; niyeti ancak politika belirleyebilir. |
+
+### Not: postmark-mcp bir rug pull'du, ama bizim pin mekanizmamızın gördüğü türden değil
+
+"Rug pull" kelimesi iki farklı saldırı için kullanılıyor:
+
+| | Tool tanımı rug pull'u | Paket (kod) rug pull'u |
+|---|---|---|
+| Ne değişiyor | `tools/list` içindeki açıklama veya şema | Sunucunun kaynak kodu (yeni npm sürümü) |
+| Saldırıyı kim yapıyor | Model (değişen talimata uyarak) | Sunucunun kendisi (modelden habersiz) |
+| Örnek | Invariant Labs rug pull demosu, OWASP MCP03 | `postmark-mcp` 1.0.16 |
+| Bizim pin mekanizmamız | Yakalar (hash değişir, tool gizlenir) | Yakalamaz (tanım aynı, hash aynı) |
+
+`postmark-mcp` paketinin ilk 15 sürümü temizdi. 1.0.16 sürümünde `sendEmail` fonksiyonunda Postmark API'ye giden
+isteğe tek satır eklendi: `Bcc: 'phan@giftshop[.]club'`. Snyk'in incelemesine göre tool adı, açıklaması ve şeması değişmedi.
+Model yine aynı `send_email` çağrısını yapıyor ve firewall aynı argümanları, aynı sonucu görüyor. BCC adresi
+JSON-RPC trafiğinde hiç görünmüyor, çünkü sunucu bu adresi Postmark API'ye kendi HTTPS bağlantısıyla gönderiyor.
+Bu yüzden 26.10.2026 sürümü bu saldırıyı engelleyemezdi.
+
+**27.10.2026'dan itibaren: sunucu kodu sabitleme (`pinning.serverCode`, `src/codepin.ts`).** Sunucu `initialize`'a
+cevap verdiğinde firewall, npx'in kurduğu paketin dosyalarını (`<npm önbelleği>/_npx/*/node_modules/postmark-mcp`)
+hash'leyip pin dosyasında saklıyor. 1.0.16 kurulduğunda `index.js` değiştiği için hash değişiyor; firewall
+`initialize` yanıtını hataya çeviriyor, o oturumda sunucuya hiçbir `send_email` çağrısı ulaşmıyor ve kayıt
+"possible package rug pull" olarak düşüyor. Operatör kodu inceleyip `mcp-firewall pins approve` diyene kadar bu sürüyor.
+Testte bu senaryo birebir canlandırıldı (`test/codepin.test.ts`): aynı tool tanımları, `index.js`'e eklenmiş bir `Bcc` satırı.
+
+Sınırları: ilk kurulan sürüm referans kabul edildiği için ilk günden kötü olan paketleri (typosquat) yakalamaz.
+Onlar için sunucuyu ağ izin listesiyle (yalnızca `api.postmarkapp.com`) sandbox içinde çalıştırmak gerekir.
+27.10.2026'dan itibaren `uvx`, `uv tool run` ve `pipx run` ile çalışan Python paketleri de otomatik bulunuyor
+(paketin wheel `RECORD` dosyasındaki dosyalar hash'leniyor). Gerçek kurulumla doğrulandı (uv 0.13.5, Windows,
+`uvx mcp-server-time` 2026.10.19): ilk çalıştırmada uv önbelleğindeki 9 dosya bulunup sabitlendi; ikinci çalıştırma
+eşleşti; `server.py`'ye tek satır eklenince firewall `initialize`'ı "possible package rug pull" diyerek engelledi;
+dosya geri alınınca sunucu yeniden çalıştı. PATH'ten doğrudan çalışan kurulu araçlar, derlenmiş
+ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
+
+## Medium yazısı için: hangi modül hangi saldırıyı yakalar
+
+| Modül | Dosya | Yakaladığı saldırılar | Yakalayamadıkları |
+|---|---|---|---|
+| Tool politikası (izin/yasak, argüman regex) | `src/engine.ts`, `src/policy.ts` | Tehlikeli tool çağrıları, yasaklı yöntemler (ör. `sampling/createMessage`), elle tanımlanmış argüman kalıpları (`..`, `/etc`, alıcı/URL izin listesi) | Kural yazılmamış her şey; niyet |
+| Açıklama tarayıcı (regex ve gizli Unicode) | `src/engine.ts` `scanToolDefinition`, `scanText` | Tool, prompt ve resource tanımlarında, `prompts/get` şablonlarında ve sunucu `instructions` alanında klasik tool poisoning ifadeleri ("ignore previous instructions", `<IMPORTANT>`, `~/.ssh`, "do not tell the user"); parametre adlarındaki talimatlar; görünmez karakterler ve ANSI kodları | Yeni ifade biçimleri, ikna edici açıklamalar (MPMA) |
+| Gizli metin temizleyici | `src/engine.ts` `stripHiddenChars`, `hiddenText` | Tool sonuçlarında, hata mesajlarında ve sampling isteklerinde Unicode TAG kaçakçılığı, varyasyon seçicisi kaçakçılığı, sıfır genişlikli ve bidi karakterleri, ANSI/OSC dizileri | Görünür ama yanıltıcı metin (homoglifler; bunları kod çözücü ML için geri alıyor) |
+| Sunucular arası ad kontrolü | `src/pinning.ts` `collisions` | Başka bir sunucunun zaten sunduğu tool adı (tool shadowing) | Benzer adlar (typosquat), tek sunucu kullanımı |
+| Tool pinleme (SHA-256) | `src/pinning.ts` | Tool tanımı rug pull'u (OWASP MCP03), şema veya açıklamanın sessizce değiştirilmesi; `onNew: hide` ile onaysız yeni tool'lar | İlk günden zehirli tanımlar (`onNew: allow` iken) |
+| Prompt şablonu pinleme | `src/pinning.ts` `hashPromptTemplate`, `pinning.prompts` | Onaylanan `prompts/get` şablonunun sonradan değiştirilmesi (argüman değerleri hash'e girmiyor) | İlk günden zehirli şablonlar (`onNew: allow` iken); her çağrıda değişen dinamik prompt'larda yanlış alarm |
+| Sunucu kodu sabitleme | `src/codepin.ts`, `pinning.serverCode` | npm (npx) ve Python (uvx, pipx) paketlerinde paket rug pull'u (postmark-mcp 1.0.16), sürümü sabitlenmemiş paketler için uyarı | Typosquat ve ilk sürümden kötü paketler, otomatik bulunamayan kod (PATH'teki kurulu araç, ikili dosya, `python -m`; `--code` gerekir) |
+| ML sınıflandırıcı (mmBERT) | `src/ml/`, `training/` | Tool çıktısındaki ve hata mesajlarındaki dolaylı injection (GitHub issue, e-posta, destek talebi, web sayfası), tanımlarda yeni ifadelerle yazılmış zehirleme, sampling ve elicitation içeriği, jailbreak metinleri, Türkçe injection (%90) ve Almanca/İspanyolca/Fransızca/Rusça injection | Görsel/ses, çok uzun çıktıların ortası (`onTruncated: warn` iken), kodlanmış metin; doğrudan kullanıcı saldırılarının bir kısmı (tehdit, şantaj, rol yapma; dış setlerde isabet %48–65); zararsız rol istemini zehirli olandan ayırmak (prompt şablonlarında bu yüzden yalnızca uyarı) |
+| DLP | `src/dlp.ts` | API anahtarları, özel anahtarlar, JWT, kart, TR IBAN, TCKN sızıntısı (istek ve yanıt); kodlanmış (base64, hex, %XX) hâlleri | Formatsız veri (sohbet geçmişi, özel repo içeriği) |
+| Kod çözücü | `src/decode.ts`, `decoding` | base64/hex/URL/kaçış dizisi/HTML varlığı ile gizlenmiş talimatlar ve secret'lar (iç içe 2 seviye); Unicode TAG ve varyasyon seçicisi kaçakçılığıyla saklanan metin (ML ve desenler gizli metni okur); leetspeak, harf aralama, noktalarla bölme, benzer harfler (homoglif), rastgele büyük-küçük harf | ROT13, parçalara bölünüp birleştirilmesi istenen komutlar, şifrelenmiş metin |
+| Fail-closed proxy | `src/proxy.ts`, `src/jsonrpc.ts` | Bozuk mesajlar, 32 MB üzeri mesajlar, iç hata durumunda trafiğin sızması | — |
+| Dashboard güvenliği | `src/dashboard/server.ts` | Kendi arayüzümüze DNS rebinding ve CSRF | — |
+| *(Önerilen)* Ağ sandbox'ı | — | Sunucunun JSON-RPC dışından veri sızdırması | Sunucunun izinli hedefe kötü niyetli istek atması |
+
+## İyileştirmeler
+
+**27.10.2026'da yapılanlar** (testli, 48/48 geçiyor):
+
+1. JSON-RPC `error` yanıtları, `initialize.instructions` alanı ve `prompts/list`, `resources/list`, `resources/templates/list` yanıtları taranıyor.
+2. Şemadaki parametre adları regex ve ML taramasına katıldı (Full-Schema Poisoning).
+3. `hiddenText`: tool sonuçlarında, hata mesajlarında ve sampling isteklerinde görünmez karakterler ve ANSI/OSC dizileri temizleniyor (veya engelleniyor). Unicode varyasyon seçicisi kaçakçılığı da kapsamda.
+4. `ml.scan.serverRequests`: `sampling/createMessage` ve `elicitation/create` içeriği ML ile taranıyor.
+5. `ml.onTruncated: block` seçeneği: taranamayan uzun metin engellenebiliyor.
+6. `pinning.onNameCollision`: sunucular arası aynı tool adı uyarı veriyor veya gizleniyor.
+7. `pinning.serverCode`: sunucu kodu sabitleme (paket rug pull'u, postmark-mcp).
+8. `pinning.onNew: hide` ve `mcp-firewall pins list/approve`: yeni ve değişen her şey, görülen hash'iyle onaylanıyor (54/54 test).
+
+9. `decoding`: kodlanmış metinler çözülüp desen, ML ve DLP taramasına ekleniyor (59/59 test).
+
+10. `sampling`: dakika ve oturum başına istek sınırı, istek başına `maxTokens` tavanı, oturum token bütçesi (64/64 test).
+
+11. `uvx`/`uv tool run`/`pipx run` paketleri için otomatik kod bulma (66/66 test).
+
+12. Karakter düzeyinde gizlemeyi geri alma (`decoding` içinde): leet, harf aralama, noktalarla bölme, benzer harfler,
+    rastgele büyük-küçük harf. Gizlenmiş zararsız metinde yanlış alarm %22–88'den %4–5'e indi; saldırı isabeti korundu (68/68 test).
+    Aynı sorun için denenen model eğitimi (v11) LLMail'de gerilediği için benimsenmedi.
+
+13. Görünmez Unicode (TAG, varyasyon seçicisi) ile gizlenmiş metin çözülüp ML'e veriliyor: v9'un Türkçe isabeti %75'ten %84'e çıktı.
+14. Varsayılan model, çok dilli mmBERT karışımı (soup05) oldu: Türkçe %86, çevrilmiş saldırılarda %97–99, LLMail %98.
+    Node'da PyTorch ile aynı kararları veriyor; transformers.js tokenizer farkı `export_onnx.py` içinde düzeltildi.
+15. Varsayılan model soup05-ab2 oldu (çeviri bileşeni görev talimatı verisiyle yeniden eğitildi): Türkçe görev
+    talimatı metinlerinde yanlış alarm %71'den %33'e indi; Türkçe isabet %90, LLMail %99, çevrilmiş saldırılarda
+    %98–99. Eğitimde görülmemiş dış setlerde İngilizce isabet %49'dan %60'a çıktı, Türkçede değişmedi. Bedeli: rol
+    istemlerinde daha fazla yanlış alarm (karıştırılmış sette %5'ten %7'ye). Node'da 750 satırın 749'unda PyTorch
+    ile aynı karar; gerçek model testi bu modelle geçiyor (69/69 test).
+16. `ml.scan.promptResults` (varsayılan `warn`): `prompts/get` şablonlarında model yalnızca uyarıyor; tanım desenleri
+    ve gizli karakter kontrolü engelliyor. Zararsız rol istemlerinde yanlış engelleme %40'tan %0,6'ya indi (72/72 test).
+17. `pinning.prompts` (28.10.2026, varsayılan `block`): prompt şablonları sabitleniyor. Argüman değerleri hash'ten
+    önce çıkarılıyor; isteğe bağlı argüman şablonu değiştirebildiği için her argüman kümesi ayrı sabitleniyor. Değişen
+    şablon onaylanana kadar reddediliyor; `onNew: hide` yeni şablonları da bekletiyor (75/75 test).
+
+**Sıradakiler:**
+
+1. Türkçe "görev talimatı" metinlerinde kalan yanlış alarm (%33) ve dış Türkçe setlerdeki düşük isabet (%48–65).
+2. Belgelere eklenecek tavsiyeler: sunucuları sandbox veya container içinde ve sınırlı ağ erişimiyle çalıştırmak; paket sürümünü sabitlemek.
+
+## Kaynaklar
+
+- [MCP-38 tehdit taksonomisi (arXiv 2603.18063)](https://arxiv.org/pdf/2603.18063)
+- [OWASP MCP Top 10](https://owasp.org/www-project-mcp-top-10/), [Cycode özeti](https://cycode.com/blog/owasp-mcp-top-10/)
+- [Beyond the Protocol (arXiv 2506.02040)](https://arxiv.org/pdf/2506.02040), [ETDI (arXiv 2506.01333)](https://arxiv.org/pdf/2506.01333)
+- [CyberArk: Poison everywhere (FSP/ATPA)](https://cyberark.com/resources/threat-research-blog/poison-everywhere-no-output-from-your-mcp-server-is-safe)
+- [Trail of Bits: ANSI terminal kodları](https://blog.trailofbits.com/2025/04/29/deceiving-users-with-ansi-terminal-codes-in-mcp/)
+- [Unicode TAG-block gizleme (arXiv 2607.05744)](https://arxiv.org/pdf/2607.05744)
+- [Unit 42: MCP sampling saldırı vektörleri](https://unit42.paloaltonetworks.com/model-context-protocol-attack-vectors/)
+- [Invariant Labs: GitHub MCP açığı](https://invariantlabs.ai/blog/mcp-github-vulnerability), [Docker: WhatsApp MCP](https://www.docker.com/blog/mcp-horror-stories-whatsapp-data-exfiltration-issue/)
+- [Simon Willison: Supabase MCP lethal trifecta](https://simonwillison.net/2025/Jul/6/supabase-mcp-lethal-trifecta/)
+- [MPMA (arXiv 2505.11154)](https://arxiv.org/pdf/2505.11154)
+- [Snyk: postmark-mcp](https://snyk.io/blog/malicious-mcp-server-on-npm-postmark-mcp-harvests-emails/)
+- [JFrog: CVE-2025-6514 mcp-remote](https://jfrog.com/blog/2025-6514-critical-mcp-remote-rce-vulnerability/), [Oligo: CVE-2025-49596](https://www.oligo.security/blog/critical-rce-vulnerability-in-anthropic-mcp-inspector-cve-2025-49596), [CVE-2025-58444](https://www.sentinelone.com/vulnerability-database/cve-2025-58444/)
+- [Cymulate: EscapeRoute CVE-2025-53109/53110](https://cymulate.com/blog/cve-2025-53109-53110-escaperoute-anthropic/)
+- [CSA: MCP tool zehirleme ve IDE otomatik çalıştırma (Temmuz 2026)](https://labs.cloudsecurityalliance.org/research/csa-research-note-mcp-tool-poisoning-auto-execution-20260701/)

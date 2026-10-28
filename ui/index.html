@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MCP Firewall</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="rail" aria-label="Ana menü">
+      <div class="rail-logo" title="MCP Firewall"></div>
+      <nav class="rail-nav">
+        <button class="rail-btn" data-view="overview" data-tip="Genel bakış"></button>
+        <button class="rail-btn" data-view="events" data-tip="Olay merkezi"></button>
+        <button class="rail-btn" data-view="ml" data-tip="ML olayları"></button>
+        <button class="rail-btn" data-action="export" data-tip="Etiketleri indir"></button>
+      </nav>
+      <div class="rail-nav rail-bottom">
+        <button class="rail-btn" data-action="help" data-tip="Yardım"></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <h1 class="title" id="title">Dashboard</h1>
+        <label class="pill-select">
+          <select id="server-filter" aria-label="Sunucu filtresi"><option value="">Tüm sunucular</option></select>
+        </label>
+        <span class="mode-badge" id="mode-badge"></span>
+        <span class="spacer"></span>
+        <span class="live" id="live" title="Audit logu her 5 saniyede okunur"><i></i>Canlı</span>
+        <button class="icon-btn" id="bell" aria-label="Bildirimler"></button>
+        <div class="view-toggle" role="tablist">
+          <button role="tab" data-view="events">Olay Merkezi</button>
+          <button role="tab" data-view="ml">ML Olayları</button>
+          <button role="tab" data-view="overview">Genel Bakış <em>(Yeni)</em></button>
+        </div>
+      </header>
+
+      <section class="view overview" id="view-overview" aria-label="Genel bakış"></section>
+      <section class="view events" id="view-events" aria-label="Olay merkezi" hidden></section>
+      <section class="view mlv" id="view-ml" aria-label="ML olayları" hidden></section>
+      <footer class="foot" id="foot"></footer>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

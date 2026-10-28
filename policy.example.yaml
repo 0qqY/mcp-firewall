@@ -1,0 +1,118 @@
+# MCP Firewall politika dosyası
+# Göreli dosya yolları bu dosyanın bulunduğu dizine göre çözülür.
+version: 1
+
+# enforce: ihlalleri engeller | monitor: sadece loglar (ilk kurulumda önerilir)
+mode: enforce
+
+audit:
+  enabled: true
+  file: ./mcp-firewall-audit.jsonl
+  logAllowed: true            # izin verilen tool çağrılarını da logla
+
+tools:
+  default: allow              # hiçbir kurala uymayan tool: allow | deny
+  # Kurallar yukarıdan aşağı değerlendirilir, İLK eşleşen kazanır (ACL mantığı).
+  # match: tool adı veya glob (* ve ?). Regex'ler büyük/küçük harf duyarsızdır.
+  # Reddedilen tool'lar tools/list yanıtından da çıkarılır; model onları hiç görmez.
+  rules:
+    - match: "delete_*"
+      action: deny
+      reason: "Silme işlemleri bu ortamda yasak"
+
+    - match: "read_file"
+      action: allow
+      arguments:
+        path:
+          deny:
+            - '\.\.[/\\]'               # path traversal
+            - '\.ssh'
+            - '\.aws[/\\]credentials'
+            - '\.env$'
+          # allow: ['^C:\\projeler\\']  # tanımlanırsa değer bunlardan birine uymak zorunda
+
+    - match: "*"
+      action: allow
+      arguments:
+        "*":                            # tüm argümanlardaki tüm string değerler
+          deny:
+            - 'rm\s+-rf'
+            - 'curl\s+[^|]*\|\s*(ba)?sh'
+
+methods:
+  # Bu JSON-RPC metodları iki yönde de engellenir (glob desteklenir)
+  deny:
+    - "sampling/createMessage"   # server'ın senin LLM'ini kullanmasını engelle
+    - "elicitation/create"       # server'ın kullanıcıdan doğrudan bilgi istemesini engelle
+
+# Tool, prompt ve resource tanımları ile sunucu "instructions" metni taranır
+# (açıklamalar, şemadaki değerler ve parametre adları).
+descriptionScan:
+  enabled: true
+  action: hide                # hide: şüpheli tanımı listeden çıkar | warn: sadece logla
+  hiddenUnicode: true         # sıfır genişlikli / bidi / tag karakterleri, ANSI kaçış kodları
+  useDefaults: true           # yerleşik tool poisoning kalıpları
+  patterns: []                # ek regex'ler
+
+# sampling/createMessage serbest bırakılırsa (methods.deny'dan çıkarılırsa) uygulanan sınırlar.
+# Sunucu, senin model kotanı harcar; 0 = sınırsız. Token sınırları isteklerin maxTokens değerini sayar.
+sampling:
+  maxPerMinute: 10            # dakikadaki istek sayısı (kayan pencere)
+  maxPerSession: 200          # oturum boyunca toplam istek
+  maxTokensPerRequest: 4096   # daha büyük maxTokens bu değere düşürülür
+  maxTokensPerSession: 100000 # oturum boyunca istenebilecek toplam token
+
+# base64/base64url, hex, %XX, \uXXXX/\xXX, &#NN; ve görünmez Unicode (TAG, varyasyon seçicisi) ile kodlanmış metinler çözülüp desenlere, ML'e ve DLP'ye
+# ayrıca verilir (iç içe 2 seviye). Okunabilir metne çözülmeyenler (hash, anahtar, ikili veri) atlanır.
+# Argümanlarda kodlanmış secret bulunursa yerinde maskelenemediği için çağrı engellenir (dlp.action: warn hariç).
+# Ayrıca karakter düzeyinde gizleme geri alınır: l33t (1gn0r3), harf aralama (i g n o r e / i.g.n.o.r.e),
+# benzer görünen Kiril/Yunan harfleri, tam genişlikli harfler ve rAsTgElE büyük-küçük harf. ML gizlenmiş
+# metni değil düzeltilmiş hâlini görür; böylece tuhaf görünen zararsız metin yanlış alarm vermez.
+decoding:
+  enabled: true
+
+# Tool sonuçları, hata mesajları ve sampling/elicitation isteklerindeki görünmez karakterler
+# (sıfır genişlikli, bidi, Unicode tag, varyasyon seçicileri) ve terminal kaçış kodları.
+hiddenText:
+  action: strip               # strip: temizle | block: engelle | warn: logla | off
+
+pinning:
+  enabled: true
+  file: ./mcp-firewall-pins.json   # sunucular arası isim çakışması için tüm sunucular aynı dosyayı kullanmalı
+  onChange: hide              # tanımı değişen tool (rug pull): hide | warn
+  onNew: allow                # yeni tool: allow (ilk kullanımda güven) | hide (mcp-firewall pins approve ile onaylanana kadar gizle)
+  onNameCollision: warn       # başka sunucuda aynı adlı tool (shadowing): hide | warn | off
+  serverCode: block           # sunucu kodu (npx paketi / yerel script) değişti (paket rug pull'u): block | warn | off
+  prompts: block              # prompts/get şablonu değişti: block | warn | off (argüman değerleri hash'e girmez;
+                              # her çağrıda değişen içerik üreten dinamik prompt'larda warn veya off)
+
+dlp:
+  enabled: true
+  scanRequests: true          # tool argümanları (veri sızdırma)
+  scanResponses: true         # tool / resource / prompt sonuçları
+  action: redact              # redact | block | warn
+  # detectors: [private_key, aws_access_key, github_token, slack_token,
+  #             anthropic_key, openai_key, jwt, credit_card, iban_tr, tckn]  # boşsa hepsi
+  custom:                     # özel kalıplar büyük/küçük harf duyarlıdır
+    - name: internal_hostname
+      pattern: '\b[a-z0-9-]+\.corp\.internal\b'
+
+# Katman 2: ML prompt-injection sınıflandırıcısı (yerel ONNX, internete çıkmaz)
+ml:
+  enabled: false
+  model: ./models/mcp-pi-mmbert-soup05-ab2   # transformers.js uyumlu dizin (README: "Varsayılan model")
+                                             # hazır baseline: ./models/protectai-deberta-v3-pi-v2 (fetch_baseline.ps1)
+  dtype: fp32                 # fp32 (onnx/model.onnx) | q8 (onnx/model_quantized.onnx; yalnızca export_onnx.py
+                              # int8 kontrolünü geçen modellerde bulunur, mmBERT ve DeBERTa'da geçmiyor)
+  injectionLabel: INJECTION   # modelin pozitif sınıf etiketi
+  threshold: 0.9              # bu skor ve üstü ihlal sayılır
+  failMode: closed            # closed: model hatası = ihlal | open: uyar ve geçir
+  chunkChars: 1500            # uzun metinler örtüşen parçalara bölünür
+  maxChunks: 32               # fazlası olursa baştan ve sondan taranır
+  onTruncated: warn           # ortası taranamayan uzun metin: block | warn (dolgu saldırısına karşı block)
+  scan:
+    toolDefinitions: hide     # hide | warn | off  (tool/prompt/resource tanımları, sunucu instructions)
+    toolResults: block        # block | warn | off  (dolaylı prompt injection; hata mesajları dahil)
+    promptResults: warn       # block | warn | off  (prompts/get şablonları; rol istemleri modele talimat olduğu
+                              # için model ayırt edemiyor, varsayılan yalnızca uyarı; desenler yine engeller)
+    serverRequests: block     # block | warn | off  (sampling/createMessage ve elicitation/create içeriği)

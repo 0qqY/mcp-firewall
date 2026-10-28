@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.jsonl
+mcp-firewall-pins.json
+mcp-firewall-pins.pending.json
+models/
+training/.venv/
+training/data/
+training/runs/
+__pycache__/
