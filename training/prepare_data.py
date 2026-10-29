@@ -15,6 +15,7 @@ from datasets import load_dataset
 
 from benign_corpus import load_all as load_benign_corpus
 from benign_prompts import load_all as load_benign_prompts
+from dev_corpus import load_all as load_dev_corpus
 from jailbreak_data import load_all as load_jailbreak
 from obfuscate import augment as obfuscate_augment
 from public_data import load_all as load_public
@@ -80,6 +81,7 @@ def main() -> None:
     ap.add_argument("--obfuscate-share", type=float, default=0.0, help="add obfuscated copies (obfuscate.py) of this share of train/val rows, both labels")
     ap.add_argument("--translated", action="store_true", help="add data/translated_{train,val}.jsonl (translate.py)")
     ap.add_argument("--task-prompts", action="store_true", help="add task_prompts.py sources (task instructions next to personal data)")
+    ap.add_argument("--dev-corpus", action="store_true", help="add dev_corpus.py sources (security-engineering text about injection)")
     args = ap.parse_args()
     rng = random.Random(args.seed)
 
@@ -115,6 +117,9 @@ def main() -> None:
             splits[split] += rows * (args.public_weight - 1 if split == "train" else 1)
     if args.task_prompts:
         for split, rows in load_task_prompts().items():
+            splits[split] += rows
+    if args.dev_corpus:
+        for split, rows in load_dev_corpus().items():
             splits[split] += rows
     for path in args.extra_train:
         splits["train"] += read_jsonl(path)
