@@ -224,8 +224,8 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     Okuma tarafı: injection mesajı ML ile, sızmış anahtar DLP+ML ile engellendi. Gönderme tarafı: giden metindeki
     secret istek tarafında maskelendi, DM'e (exfil) gönderim `channel_id ^D` ile reddedildi. `post_message` gerçeğe
     uygun biçimde yalnızca ack dönüyor; metni echo'lamak redaksiyon işaretini sonuç olarak yeniden taratıyordu.
-60. **5 ek MCP (yerel mock) kapsamlı testi** (denetimsiz, 29.10.2026; test sonrası silindi, repo'ya alınmadı):
-    GitHub, Shell, E-posta, Docs/Prompts, Integrations. İlk kez kapsanan katmanlar — descriptionScan (zehirli tool
+60. **5 ek MCP (yerel mock) kapsamlı testi** (denetimsiz, 29.10.2026; önce silinmiş, sonra kullanıcı isteğiyle
+    `demo/more-mcps/` olarak eklendi — c3854e0): GitHub, Shell, E-posta, Docs/Prompts, Integrations. İlk kez kapsanan katmanlar — descriptionScan (zehirli tool
     açıklaması + gizli Unicode → tool gizlendi), hiddenText (ANSI/zero-width terminal kaçışları → engellendi),
     decoding+ML (base64 injection), pinning (prompt rug-pull ve tool rug-pull → değişen tanım gizlendi/engellendi),
     methods.deny (`resources/*`), DLP istek tarafı (harici e-posta alıcısı + giden secret). **Bulgu:** DLP bir
