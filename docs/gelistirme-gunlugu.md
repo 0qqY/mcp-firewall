@@ -214,3 +214,21 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     (`=`/`:`, tırnak toleranslı) geldiğinde maskeleniyor, çıplak 40 karakterlik base64 ise (ör. commit hash'i)
     bırakılıyor. Anahtar adı görünür kalsın diye yalnızca değer redakte ediliyor (lookbehind). Artık `config.env`
     DLP'de maskelenip geçiyor, ML'e muhtaç değil (87/87 test).
+58. **DLP açığı (devam): JSON'da kaçışlanmış satır sonu.** `demo/sql` 12 sorguluk kapsamlı teste genişletilince,
+    satır JSON olarak döndüğünde gerçek satır sonunun `\n` (ters-bölü + `n`) biçiminde kaçışlandığı ve bu `n`'in
+    etikete yapışıp `aws_secret_key` detektörünün etiket başındaki `\b` sınırını düşürdüğü görüldü
+    (`…\nAWS_SECRET_ACCESS_KEY=`); o koşuda gizli anahtarı yalnızca ML (0,937) yakaladı. Çözüm: etiketin baştaki
+    `\b`'si kaldırıldı — yanlış-pozitif korumaları (etiketsiz 40 karakterlik hash, ayrı sütunlar) sürüyor;
+    `test/engine.test.ts`'e kaçışlanmış-satır durumu eklendi. Artık JSON içindeki `.env` bloğunda da maskeleniyor.
+59. **Slack testi (`demo/slack`):** gerçek `server-slack` tool yüzeyini taklit eden yerel mock (token/ağ yok).
+    Okuma tarafı: injection mesajı ML ile, sızmış anahtar DLP+ML ile engellendi. Gönderme tarafı: giden metindeki
+    secret istek tarafında maskelendi, DM'e (exfil) gönderim `channel_id ^D` ile reddedildi. `post_message` gerçeğe
+    uygun biçimde yalnızca ack dönüyor; metni echo'lamak redaksiyon işaretini sonuç olarak yeniden taratıyordu.
+60. **5 ek MCP (yerel mock) kapsamlı testi** (denetimsiz, 29.10.2026; test sonrası silindi, repo'ya alınmadı):
+    GitHub, Shell, E-posta, Docs/Prompts, Integrations. İlk kez kapsanan katmanlar — descriptionScan (zehirli tool
+    açıklaması + gizli Unicode → tool gizlendi), hiddenText (ANSI/zero-width terminal kaçışları → engellendi),
+    decoding+ML (base64 injection), pinning (prompt rug-pull ve tool rug-pull → değişen tanım gizlendi/engellendi),
+    methods.deny (`resources/*`), DLP istek tarafı (harici e-posta alıcısı + giden secret). **Bulgu:** DLP bir
+    secret'i `[REDACTED:…]` ile değiştirince, "key/token" geçen düz metinde bu işaret ML skorunu ~1,000'e çıkarıp
+    sonucu tümden bloklayabiliyor (yapısal veride olmuyor). Giden ack'lerin metni echo'lamaması bu ikinci taramayı
+    önler; katmanlı savunma açısından güvenli tarafta hata.

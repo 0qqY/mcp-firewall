@@ -100,6 +100,9 @@ test('DLP redacts an AWS secret access key by its label, keeping the key name, a
     {
       env: 'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
       json: '"aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"',
+      // A multi-line blob delivered as a JSON string: the newline is escaped to a literal `\n`, so the label is
+      // preceded by that `n` rather than whitespace. The detector must still catch it.
+      escaped: 'DB_HOST=db\\nAWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
       other: 'sha=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
     },
     detectors,
@@ -107,9 +110,10 @@ test('DLP redacts an AWS secret access key by its label, keeping the key name, a
   const value = scan.value as Record<string, string>;
   assert.equal(value.env, 'AWS_SECRET_ACCESS_KEY=[REDACTED:aws_secret_key]');
   assert.equal(value.json, '"aws_secret_access_key": "[REDACTED:aws_secret_key]"');
+  assert.equal(value.escaped, 'DB_HOST=db\\nAWS_SECRET_ACCESS_KEY=[REDACTED:aws_secret_key]');
   // Same 40-char string under an unrelated name (a commit hash field) is left alone — no blanket base64 rule.
   assert.equal(value.other, 'sha=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY');
-  assert.equal(scan.findings.find((f) => f.detector === 'aws_secret_key')?.count, 2);
+  assert.equal(scan.findings.find((f) => f.detector === 'aws_secret_key')?.count, 3);
 });
 
 test('DLP leaves binary content alone', () => {

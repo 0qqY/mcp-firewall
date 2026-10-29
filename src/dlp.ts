@@ -44,8 +44,10 @@ export const BUILTIN_DETECTORS: Record<string, Omit<Detector, 'name'>> = {
   aws_access_key: { regex: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g },
   // The 40-char AWS secret access key has no fixed shape of its own, so match it only where a
   // `(aws_)secret_access_key` label and `=`/`:` name it; a bare 40-char base64 string is far too common to flag.
+  // No left word boundary on the label: in a JSON-encoded blob a newline becomes a literal `\n`, and that `n`
+  // glues onto the label (`...\nAWS_SECRET_ACCESS_KEY=`), which a leading \b would reject — letting the secret leak.
   aws_secret_key: {
-    regex: /(?<=\b(?:aws[_-]?)?secret[_-]?access[_-]?key\b["']?\s{0,4}[:=]\s{0,4}["']?)[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])/gi,
+    regex: /(?<=(?:aws[_-]?)?secret[_-]?access[_-]?key\b["']?\s{0,4}[:=]\s{0,4}["']?)[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])/gi,
   },
   github_token: { regex: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})\b/g },
   slack_token: { regex: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g },
