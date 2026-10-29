@@ -2,7 +2,7 @@ import type { Readable, Writable } from 'node:stream';
 import type { AuditEvent, AuditLog } from './audit.js';
 import type { CodeFingerprint } from './codepin.js';
 import { decodeEmbedded, withDecoded } from './decode.js';
-import { deepScan, formatFindings } from './dlp.js';
+import { deepScan, formatFindings, REDACTION_MARKER } from './dlp.js';
 import {
   evaluateMethod,
   evaluateToolCall,
@@ -533,7 +533,10 @@ export class FirewallProxy {
   private async mlFlags(texts: string[], ctx: Context): Promise<(MlFlag | undefined)[]> {
     const { ml, decoding } = this.policy;
     try {
-      const scores = await scoreTexts(await this.loadModel(), decoding.enabled ? texts.map(withDecoded) : texts, ml);
+      // Neutralise our own DLP redaction markers before scoring: the bracketed [REDACTED:…] reads as an injection
+      // to the classifier and would turn a masked result into a block. Affects only the scan input, not the output.
+      const scan = texts.map((t) => t.replace(REDACTION_MARKER, 'redacted'));
+      const scores = await scoreTexts(await this.loadModel(), decoding.enabled ? scan.map(withDecoded) : scan, ml);
       return scores.map((s) => {
         if (s.score >= ml.threshold) {
           return { reason: `ML classifier flagged possible prompt injection (score ${s.score.toFixed(3)})`, score: s.score, excerpt: s.excerpt };

@@ -70,13 +70,22 @@ export function buildDetectors(names: string[] | undefined, custom: { name: stri
   return detectors;
 }
 
+/** Placeholder scanText leaves where a secret was. */
+const redactionPlaceholder = (name: string): string => `[REDACTED:${name}]`;
+/**
+ * Matches any placeholder `redactionPlaceholder` produces, for the ML layer to neutralise before scoring: the
+ * bracketed `[REDACTED:…]` marker itself reads as an injection to the classifier, which would otherwise turn a
+ * DLP-masked result into a hard block. Keep in sync with `redactionPlaceholder`.
+ */
+export const REDACTION_MARKER = /\[REDACTED:[^\]]+\]/g;
+
 function scanText(text: string, detectors: Detector[], counts: Map<string, number>): string {
   let out = text;
   for (const d of detectors) {
     out = out.replace(d.regex, (match) => {
       if (d.validate && !d.validate(match)) return match;
       counts.set(d.name, (counts.get(d.name) ?? 0) + 1);
-      return `[REDACTED:${d.name}]`;
+      return redactionPlaceholder(d.name);
     });
   }
   return out;

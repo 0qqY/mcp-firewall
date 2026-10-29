@@ -33,6 +33,6 @@ ML kullanan demolar için model: `MCP_FIREWALL_MODEL` ile yol verin (varsayılan
 ## Not
 
 - Hepsi yerel/denetimli mock'tur; gerçek hesap/üretim değildir. Kalıcılık istemeyen `run-*` çıktıları gitignore'da.
-- İlginç bir gözlem: DLP bir secret'i `[REDACTED:…]` ile değiştirince, "key/token" geçen **düz metinde** bu işaret
-  ML skorunu yükseltip sonucu tümden bloklayabilir (yapısal veride olmaz). Bu yüzden `mail`/`slack` demolarında
-  giden gönderi yalnızca ack döner, metni echo'lamaz.
+- Eski bir gözlem (artık düzeltildi, bkz. günlük 61): DLP bir secret'i `[REDACTED:…]` ile değiştirince, "key/token"
+  geçen düz metinde bu işaret ML skorunu yükseltip maskeli sonucu bloklayabiliyordu. `mlFlags` artık skorlamadan
+  önce işareti nötrlediği için bu olmuyor. `mail`/`slack` yine de ack döner (gerçek API'ler gibi), metni echo'lamaz.

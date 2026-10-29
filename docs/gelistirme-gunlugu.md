@@ -221,7 +221,7 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     `\b`'si kaldırıldı — yanlış-pozitif korumaları (etiketsiz 40 karakterlik hash, ayrı sütunlar) sürüyor;
     `test/engine.test.ts`'e kaçışlanmış-satır durumu eklendi. Artık JSON içindeki `.env` bloğunda da maskeleniyor.
 59. **Slack testi (`demo/slack`):** gerçek `server-slack` tool yüzeyini taklit eden yerel mock (token/ağ yok).
-    Okuma tarafı: injection mesajı ML ile, sızmış anahtar DLP+ML ile engellendi. Gönderme tarafı: giden metindeki
+    Okuma tarafı: injection mesajı ML ile engellendi, sızmış anahtar DLP ile maskelenip geçti (bkz. 61). Gönderme tarafı: giden metindeki
     secret istek tarafında maskelendi, DM'e (exfil) gönderim `channel_id ^D` ile reddedildi. `post_message` gerçeğe
     uygun biçimde yalnızca ack dönüyor; metni echo'lamak redaksiyon işaretini sonuç olarak yeniden taratıyordu.
 60. **5 ek MCP (yerel mock) kapsamlı testi** (denetimsiz, 29.10.2026; önce silinmiş, sonra kullanıcı isteğiyle
@@ -232,3 +232,11 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     secret'i `[REDACTED:…]` ile değiştirince, "key/token" geçen düz metinde bu işaret ML skorunu ~1,000'e çıkarıp
     sonucu tümden bloklayabiliyor (yapısal veride olmuyor). Giden ack'lerin metni echo'lamaması bu ikinci taramayı
     önler; katmanlı savunma açısından güvenli tarafta hata.
+61. **`[REDACTED]` yanlış-alarmı düzeltildi:** 60'taki gözlem — DLP bir secret'i `[REDACTED:…]` ile değiştirince
+    köşeli parantezli işaret ML'de injection gibi okunup maskeli sonucu bloklayabiliyordu (ör. "…key is
+    [REDACTED:github_token]" skoru 1,000). Çözüm: `mlFlags` artık skorlamadan **önce** işareti nötr bir kelimeyle
+    (`redacted`) değiştiriyor — yalnızca tarama kopyasında; istemciye iletilen `[REDACTED:…]` değişmez. Ölçüm:
+    aynı metin 1,000 → 0,002; gerçek injection 1,000 kalıyor (işaret gerçek saldırılarda bulunmaz). İşaret regex'i
+    `REDACTION_MARKER` olarak src/dlp.ts'ten export edildi, `redactionPlaceholder` ile aynı biçimde tutuluyor;
+    `test/ml.test.ts`'e sahte-sınıflandırıcı testi eklendi (88/88). Slack `#random` artık bloklanmak yerine
+    DLP ile maskelenip geçiyor.
