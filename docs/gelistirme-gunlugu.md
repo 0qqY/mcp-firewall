@@ -240,3 +240,9 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     `REDACTION_MARKER` olarak src/dlp.ts'ten export edildi, `redactionPlaceholder` ile aynı biçimde tutuluyor;
     `test/ml.test.ts`'e sahte-sınıflandırıcı testi eklendi (88/88). Slack `#random` artık bloklanmak yerine
     DLP ile maskelenip geçiyor.
+62. **Decoder yanlış-yazımı düzeltildi (ISO zaman / `\u`-`\x` escape):** `deobfuscate`'in l33t geri-yazımı,
+    `-`/`:` ile ayrılan ISO parçası `28T07`'yi `2bTot`, unicode/hex escape token'ı `u003e`/`x1b`'yi `uooee`/`xib`
+    yapıyordu — hem kelime-başı hem "yaygın l33t" dalında (kısa, escape-yoğun metinde ikincisi tetikleniyor).
+    Ortak `structuredToken` muafiyeti (`\d+T\d+`, `u<4 hex>`, `x<2 hex>`) iki dala da eklendi; gerçek l33t
+    geri-yazımı (`7he c0st 0f` → `the cost of`, `1gn0r3` → `ignore`) korunuyor. `test/decode.ts`'e iki
+    "değişmeden kalır" satırı (ISO + escape) eklendi. 88/88 test.

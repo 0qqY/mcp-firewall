@@ -64,6 +64,8 @@ test('ordinary text survives de-obfuscation', () => {
     'Kullanıcı şifresini değiştirdi ve TCKN doğrulandı; çerez 7f3a-19bd, MLH1 geni, evin 200bini peşin.',
     'The NASA API and the GitHub CLI are configured.',
     'Hello ChatGPT! Write to team@example.com about the 10AM call on June 1st, or 3pm. Use 2fa!',
+    'Logged at 2026-10-28T07:30:00Z and 2025-01-02T23:59Z; nothing unusual.',
+    'Escape sequences \\u003e \\u00E9 and \\x1b stay intact in the log.',
   ]) {
     assert.equal(deobfuscate(text), text);
   }

@@ -132,8 +132,9 @@ export function deobfuscate(text: string): string {
   out = out.replace(/\b(?:[A-Za-z][ ._\-*]){3,}[A-Za-z]\b/g, (run) => run.replace(/[ ._\-*]/g, ''));
   // l33t: digits or symbols inside words that are mostly letters ("1gn0r3", "in5truc71on$").
   // Symbols count only between letters or digits ("Hello!" stays), e-mail addresses stay, and so do
-  // version-like tokens (sha256, v2, x86, MLH1), hex ids (7f3a), and numbers with a unit or suffix
-  // (1st, 10AM, 3pm, 2fa, 200bini). When l33t is everywhere ("7he", "@nd", "0f" in over a fifth of the
+  // version-like tokens (sha256, v2, x86, MLH1), hex ids (7f3a), numbers with a unit or suffix
+  // (1st, 10AM, 3pm, 2fa, 200bini), ISO date-time fragments (28T07) and \u/\x escapes (u003e, x1b).
+  // When l33t is everywhere ("7he", "@nd", "0f" in over a fifth of the
   // words), the text is obfuscated as a whole and every word with a letter is mapped back.
   const leety = (w: string) => /[A-Za-z]/.test(w) && /[0-9@$!]/.test(w);
   // Counted without e-mail addresses and without a closing "!" ("Hello!").
@@ -144,16 +145,18 @@ export function deobfuscate(text: string): string {
   const counted = tokens.filter((w) => leety(w) && !versionLike.test(w)).length;
   const everywhere = tokens.length >= 5 && counted >= 3 && counted / tokens.length > 0.2;
   const map = (w: string) => [...w].map((c) => LEET_BACK[c] ?? c).join('');
+  // ISO date-time fragments (28T07) and \u / \x escapes (u003e, x1b) are not l33t — never map them, in either branch.
+  const structuredToken = (w: string) => /^\d+T\d+$|^u[0-9a-fA-F]{4}$|^x[0-9a-fA-F]{2}$/.test(w);
   if (everywhere) {
     // Short all-l33t words ("@", "70", "15", "!5") are mapped too: here they are "a", "to", "is".
     const shortLeet = (w: string) => w.length <= 3 && [...w].every((c) => c in LEET_BACK);
     out = out.replace(/[A-Za-z0-9@$!]+/g, (word, at: number, all: string) =>
-      (leety(word) || shortLeet(word)) && !(word.includes('@') && /^\.[A-Za-z]/.test(all.slice(at + word.length))) ? map(word) : word);
+      (leety(word) || shortLeet(word)) && !structuredToken(word) && !(word.includes('@') && /^\.[A-Za-z]/.test(all.slice(at + word.length))) ? map(word) : word);
   }
   out = out.replace(/[A-Za-z0-9](?:[A-Za-z0-9@$!]*[A-Za-z0-9])?/g, (word, at: number, all: string) => {
     const swaps = [...word].filter((c) => c in LEET_BACK).length;
     if (swaps === 0 || swaps > (word.length * 2) / 3 || !/[A-Za-z]/.test(word)) return word;
-    if (/^[A-Za-z]?\d+$|^[A-Za-z]+\d{2,}$|^[A-Z]+\d+$|^\d+[A-Za-z]{1,3}$|^\d{2,}[A-Za-z]+$|^[0-9a-f]+$/.test(word)) return word;
+    if (structuredToken(word) || /^[A-Za-z]?\d+$|^[A-Za-z]+\d{2,}$|^[A-Z]+\d+$|^\d+[A-Za-z]{1,3}$|^\d{2,}[A-Za-z]+$|^[0-9a-f]+$/.test(word)) return word;
     if (word.includes('@') && /^\.[A-Za-z]/.test(all.slice(at + word.length))) return word;
     return map(word);
   });
