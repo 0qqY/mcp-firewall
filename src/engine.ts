@@ -1,5 +1,6 @@
 import { withDecoded } from './decode.js';
 import { isObject, type JsonObject } from './jsonrpc.js';
+import { checkPaths } from './paths.js';
 import type { Policy, ToolRule } from './policy.js';
 
 export interface Decision {
@@ -103,6 +104,10 @@ export function evaluateToolCall(policy: Policy, name: string, args: unknown): D
         return { allowed: false, reason: `argument '${key}' is not in the allow list` };
       }
     }
+  }
+  if (rule.paths) {
+    const reason = checkPaths(rule.paths, isObject(args) ? args : {});
+    if (reason) return { allowed: false, reason };
   }
   return ALLOW;
 }

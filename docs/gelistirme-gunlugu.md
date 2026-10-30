@@ -258,3 +258,12 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     çevrilmiş set FPR %0,8 → %2,2, İngilizce görev talimatı FPR %39 → %53. ONNX fp32 (int8 silindi), Node 798 satırda
     0 karar farkı, 88/88 test. `policy.example.yaml`, demolar, gerçek model testi ve `temizlik.ps1` yeni dizini
     kullanıyor; önceki model `models/mcp-pi-mmbert-soup05-ab2` geri dönüş için duruyor.
+64. **`paths` yol kısıtı (30.10.2026):** regex'le yol denetimi `%2e%2e/`, Windows kısa adları ve junction'larla
+    atlatılabiliyordu. Yeni `src/paths.ts`: değer ve %-çözülmüş biçimleri (en çok 3 kat) `file://`, `~`, `base`'e göre
+    göreli yol ve `..` çözülerek mutlak yola çevriliyor. Var olan en uzun ön ek `realpathSync.native` ile açılıyor
+    (bağlar, junction'lar, 8.3 adlar). Windows'ta sondaki nokta/boşluk ve `:akış` atılıyor, `\\?\C:\` ön eki
+    sökülüyor. Kalıplar `**` / `*` / `?` glob'ları ve eşleşen dizinin altını da kapsıyor. Test sırasında bulunan
+    açık: `\\sunucu\paylaşım` yolunda `existsSync` Windows'u o sunucuya bağlatıyordu (2,7 sn; NTLM özeti sızabilir).
+    Artık UNC yollarına dosya sistemi çağrısı yapılmıyor. `\\.\pipe\`, `\\.\C:`, `\\?\GLOBALROOT` gibi aygıt yolları
+    reddediliyor. `test/paths.test.ts` 9 test (Windows'a özgü 3'ü başka sistemde atlanıyor), toplam 97/97.
+    `policy.example.yaml`'daki `read_file` kuralı regex yerine `paths` kullanıyor.

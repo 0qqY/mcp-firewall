@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { buildDetectors, type Detector } from './dlp.js';
 import { globToRegExp } from './glob.js';
+import { compilePathPattern, type PathConstraint } from './paths.js';
 
 export type Mode = 'enforce' | 'monitor';
 export type Action = 'allow' | 'deny';
@@ -20,6 +21,8 @@ export interface ToolRule {
   reason?: string;
   /** Keyed by top-level argument name; `*` means every string anywhere in the arguments. */
   arguments: Map<string, ArgumentConstraint>;
+  /** Path arguments, checked on their canonical form (decoded, resolved, symlinks followed). */
+  paths?: PathConstraint;
 }
 
 export interface Policy {
@@ -143,7 +146,23 @@ function filePath(v: unknown, def: string, baseDir: string, path: string): strin
   return isAbsolute(v) ? v : resolve(baseDir, v);
 }
 
-function compileRule(raw: unknown, path: string): ToolRule {
+function compilePaths(raw: unknown, baseDir: string, path: string): PathConstraint | undefined {
+  if (raw === undefined) return undefined;
+  const p = obj(raw, path);
+  const names = strList(p.arguments, `${path}.arguments`);
+  if (!names?.length) throw new PolicyError(`${path}.arguments: list the argument names that hold paths`);
+  if (p.base !== undefined && typeof p.base !== 'string') throw new PolicyError(`${path}.base: expected a directory`);
+  const patterns = (key: 'allow' | 'deny') => (strList(p[key], `${path}.${key}`) ?? []).map((s) => compilePathPattern(s, baseDir));
+  return {
+    arguments: names,
+    allow: patterns('allow'),
+    deny: patterns('deny'),
+    base: typeof p.base === 'string' ? resolve(baseDir, p.base) : process.cwd(),
+    platform: process.platform,
+  };
+}
+
+function compileRule(raw: unknown, path: string, baseDir: string): ToolRule {
   const r = obj(raw, path);
   if (typeof r.match !== 'string') throw new PolicyError(`${path}.match: expected a tool name or glob`);
   if (r.action === undefined) throw new PolicyError(`${path}.action: required`);
@@ -162,6 +181,7 @@ function compileRule(raw: unknown, path: string): ToolRule {
     action: oneOf(r.action, ['allow', 'deny'] as const, 'deny', `${path}.action`),
     reason: r.reason,
     arguments: args,
+    paths: compilePaths(r.paths, baseDir, `${path}.paths`),
   };
 }
 
@@ -215,7 +235,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
     },
     tools: {
       default: oneOf(tools.default, ['allow', 'deny'] as const, 'allow', 'tools.default'),
-      rules: rules.map((r, i) => compileRule(r, `tools.rules[${i}]`)),
+      rules: rules.map((r, i) => compileRule(r, `tools.rules[${i}]`, baseDir)),
     },
     methods: {
       deny: (strList(methods.deny, 'methods.deny') ?? []).map(globToRegExp),

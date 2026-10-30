@@ -15,7 +15,8 @@ Host ──stdio──► mcp-firewall ──stdio──► Gerçek MCP server
 | Tehdit | Kontrol |
 |---|---|
 | Tehlikeli tool kullanımı | `tools.rules` allow/deny (ilk eşleşen kazanır). Reddedilen tool'lar `tools/list`'ten de gizlenir |
-| Path traversal, komut enjeksiyonu | Argüman bazlı `deny` / `allow` regex'leri, `"*"` ile tüm iç içe değerler |
+| Path traversal | `paths`: yol argümanları kanonik biçimde (`%2e%2e`, `file://`, `~`, `..` çözülmüş, sembolik bağ/junction izlenmiş; Windows'ta kısa adlar, sondaki nokta/boşluk, `::$DATA`) izinli kök dizinlere ve yasak kalıplara göre denetlenir; ağ (UNC) ve aygıt yolları reddedilir |
+| Komut enjeksiyonu | Argüman bazlı `deny` / `allow` regex'leri, `"*"` ile tüm iç içe değerler |
 | Tool poisoning | `descriptionScan`: açıklama, şema değerleri **ve parametre adları** içinde injection kalıpları ve gizli Unicode/ANSI |
 | Full-schema poisoning | Parametre adları (`readSshKey` → "read ssh key") regex ve ML taramasına dahil |
 | Zehirli sunucu talimatları, prompt/resource listeleri | `initialize` ve `server/discover` (MCP 2026-07-28) yanıtlarındaki `instructions`, `prompts/list`, `resources/list`, `resources/templates/list` taranır; zehirli olan çıkarılır |
@@ -78,6 +79,32 @@ JSONL olarak `audit.file` dosyasına gider. Politika referansı için [policy.ex
 
 **İpucu:** Yeni bir server'ı önce `mode: monitor` ile çalıştır, audit logunda `would_block` kayıtlarını
 inceleyip kuralları ayarla, sonra `enforce`'a geç.
+
+### Yol kısıtı (`paths`)
+Regex ile yol denetimi kolay atlatılır: `..\`, `%2e%2e/`, `file:///`, `C:\PROGRA~1`, `secret.env.` ya da izinli
+dizindeki bir junction aynı dosyaya farklı yazımlarla ulaşır. `paths` bloğu her değeri önce dosya sisteminin
+göreceği biçime getirir, sonra karşılaştırır:
+
+```yaml
+- match: "read_file"
+  action: allow
+  paths:
+    arguments: [path, paths]      # yol tutan argümanlar (string ya da string listesi)
+    allow: ['~/projeler']         # yol bunlardan birinin altında olmak zorunda
+    deny: ['**/.ssh', '**/.env', '**/*.pem']
+```
+
+- Değerin kendisi ve %-çözülmüş biçimleri (en çok 3 kat) ayrı ayrı denetlenir; biri bile yasaksa ya da izinli
+  kökün dışındaysa çağrı reddedilir. Kontrol karakteri içeren değerler reddedilir.
+- `file://` URL'leri, `~`, göreli yollar (`base`, varsayılan firewall'un çalışma dizini) ve `..` çözülür. Var olan
+  en uzun ön ek `realpath` ile açılır: sembolik bağlar, junction'lar ve Windows kısa adları gerçek yola döner.
+- Windows'ta sondaki nokta ve boşluklar silinir, `ad:akış` (`::$DATA`) `ad` sayılır, `\\?\C:\` ön eki atılır.
+  Ağ (UNC) yollarına dokunulmaz (dosya sistemine sormak NTLM kimlik bilgisini o sunucuya gönderir); hiçbir izinli
+  köke uymadıkları için reddedilirler. Diğer aygıt yolları (`\\.\pipe\`, `\\?\GLOBALROOT`) da reddedilir.
+- Kalıplarda `**` dizin aşar, `*` ve `?` aşmaz; bir kalıp eşleştiği dizinin altındaki her şeyi de kapsar.
+  Windows ve macOS'ta büyük-küçük harf duyarsızdır.
+- Sınır: denetim çağrı anındadır. Denetimden sonra, sunucu dosyayı açmadan önce bağ değiştirilirse (TOCTOU) bunu
+  yakalayamaz; sunucunun kendi kök kısıtıyla birlikte kullanın.
 
 ### Pinler ve onay
 Firewall ilk görüşte üç şeyi sabitler (pinler): tool tanımlarını, sunucu kodunu ve prompt şablonlarını. `onNew: hide`
@@ -604,14 +631,14 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 
 ## Bilinen sınırlamalar
 - Regex tabanlı argüman denetimi encoding/normalizasyon hilelerine açıktır (ör. `%2e%2e/`, Windows kısa yolları).
-  Yol argümanları için normalize edip kanonik yol karşılaştırması yapan bir `paths` kısıtı planlanıyor.
+  Yol argümanları için `paths` kullanın; `paths` de denetimden sonra değiştirilen bağları (TOCTOU) yakalayamaz.
 - Description taraması kalıp tabanlıdır; yeni ifade biçimlerini kaçırabilir.
 - JSON-RPC batch'leri tek tek mesajlar olarak iletilir.
 - ML sınıflandırıcısı da bir modeldir: adversarial girdilerle atlatılabilir, bu yüzden tek savunma hattı değildir.
 
 ## Yol haritası
 1. Etiketli audit verisiyle model eğitimi ve red team döngüsü
-2. Yol normalizasyonlu `paths` kısıtı
+2. Yol normalizasyonlu `paths` kısıtı — yapıldı (30.10.2026, yukarıda "Yol kısıtı")
 3. Oturum bazlı taint tracking (hassas veri okunduktan sonra dışarı yazan tool'ları engelle)
 4. Riskli çağrılar için human-in-the-loop onayı
 5. Streamable HTTP gateway modu (aynı politika motoru)

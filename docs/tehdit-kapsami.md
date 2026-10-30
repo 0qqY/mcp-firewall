@@ -180,6 +180,11 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
     kaldı; Türkçe isabet %90'dan %89'a indi, Türkçe yanlış alarm %12'den %9'a indi. Bedeli: çevrilmiş setteki
     zararsız metinlerde yanlış alarm %0,8'den %2,2'ye, İngilizce görev talimatlarında %39'dan %53'e çıktı. Node'da
     798 satırda PyTorch ile aynı karar (88/88 test).
+22. `paths` yol kısıtı (30.10.2026): yol argümanları kanonik biçimleriyle (`%2e%2e` ve çift kodlama, `file://`, `~`,
+    `..`, sembolik bağ ve junction, Windows kısa adları, sondaki nokta/boşluk, `::$DATA`) izinli köklere ve yasak
+    kalıplara göre denetleniyor. UNC yolları dosya sistemine sorulmadan reddediliyor (sormak NTLM özetini o sunucuya
+    gönderirdi); `\\.\pipe\` gibi aygıt yolları da reddediliyor. Kalan sınır: denetimden sonra değiştirilen bağ
+    (TOCTOU). 97/97 test.
 
 **Sıradakiler:**
 

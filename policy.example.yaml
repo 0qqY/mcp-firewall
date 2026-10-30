@@ -22,14 +22,15 @@ tools:
 
     - match: "read_file"
       action: allow
-      arguments:
-        path:
-          deny:
-            - '\.\.[/\\]'               # path traversal
-            - '\.ssh'
-            - '\.aws[/\\]credentials'
-            - '\.env$'
-          # allow: ['^C:\\projeler\\']  # tanımlanırsa değer bunlardan birine uymak zorunda
+      # paths: yol argümanları kanonik biçimleriyle denetlenir: %2e%2e, file://, ~ ve .. çözülür, sembolik
+      # bağlar/junction'lar izlenir; Windows'ta kısa adlar (PROGRA~1), sondaki nokta/boşluk ve ::$DATA
+      # akışları da. Ağ (UNC) ve aygıt yolları hiçbir izin listesine uymaz. Kalıplarda ** dizin aşar, * aşmaz;
+      # bir kalıp altındaki her şeyi de kapsar.
+      paths:
+        arguments: [path]               # yol tutan argümanlar (string ya da string listesi)
+        deny: ['**/.ssh', '**/.aws/credentials', '**/.env', '**/*.pem']
+        # allow: ['~/projeler']         # tanımlanırsa yol bunlardan birinin altında olmak zorunda
+        # base: .                       # göreli yollar için dizin (varsayılan: firewall'un çalışma dizini)
 
     - match: "*"
       action: allow
