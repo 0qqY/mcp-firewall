@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { decodeEmbedded } from './decode.js';
+import { decodeEmbedded, deobfuscate } from './decode.js';
 import { extractText } from './ml/classifier.js';
 
 export interface TaintSource {
@@ -42,22 +42,76 @@ const RARE_TOKEN = /^(?=.*\p{L})(?=.*\p{N})[\p{L}\p{N}]{16,}$/u;
 /** Fingerprints kept per label and session, so a huge result cannot exhaust memory. */
 const MAX_HASHES = 200_000;
 
-const words = (text: string): string[] => text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-const digest = (s: string): string => createHash('sha256').update(s).digest('base64url').slice(0, 16);
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 
 /**
- * Fingerprints of a text: hashed word shingles plus key-like single words. Only hashes are kept, so the
- * tracker never holds (or writes to disk) the data it protects.
+ * Undoes the wrapping text picks up on its way between tools: JSON string escapes (once or twice: "\\n" glued
+ * a newline's "n" onto the next word), HTML tags and entities, and invisible format characters (zero-width,
+ * soft hyphen, bidi) that split words without showing. Fullwidth and other compatibility forms fold (NFKC).
  */
-export function fingerprints(text: string): Set<string> {
+function unwrap(text: string): string {
+  let out = text;
+  for (let i = 0; i < 2 && /\\[nrtbfu"\\/]/.test(out); i++) {
+    out = out
+      .replace(/\\u([0-9a-fA-F]{4})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)))
+      .replace(/\\[nrtbf]/g, ' ')
+      .replace(/\\(["\\/])/g, '$1');
+  }
+  out = out
+    .replace(/<\/?[A-Za-z][^<>]{0,200}>/g, ' ')
+    .replace(/&#(x[0-9a-fA-F]{1,6}|\d{1,7});/g, (_, n: string) => {
+      const code = n.startsWith('x') ? parseInt(n.slice(1), 16) : Number(n);
+      return code <= 0x10ffff ? String.fromCodePoint(code) : ' ';
+    })
+    .replace(/&([a-z]+);/g, (m, name: string) => ENTITIES[name] ?? m);
+  return out.replace(/\p{Cf}/gu, '').normalize('NFKC');
+}
+
+/**
+ * Words compared case- and accent-blind (Turkish dotless and dotted i included, so "ISIK" meets "ışık").
+ * With `split`, camelCase humps become words ("sendChatHistory" -> send chat history).
+ */
+function words(text: string, split: boolean): string[] {
+  const t = split ? text.replace(/(\p{Ll}|\p{N})(\p{Lu})/gu, '$1 $2') : text;
+  const folded = t.toLowerCase().replace(/ı/g, 'i').normalize('NFD').replace(/\p{M}/gu, '');
+  return folded.match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+const digest = (s: string): string => createHash('sha256').update(s).digest('base64url').slice(0, 16);
+
+/** The forms a text is compared in: as written, de-obfuscated (look-alikes, l33t, s p a c e d letters), and decoded. */
+function forms(text: string): string[] {
+  const plain = unwrap(text);
+  const clear = deobfuscate(plain);
+  // base64 wrapped at fixed width (MIME, PEM) decodes only once the lines are joined again.
+  // PEM-style armour lines end in dashes, which would otherwise glue onto the first line and shift it.
+  const joined = plain.replace(/-----[A-Z0-9 ]+-----/g, '\n').replace(/([A-Za-z0-9+/=_-])\s*\r?\n\s*(?=[A-Za-z0-9+/=_-])/g, '$1');
+  const decoded = new Set([...decodeEmbedded(plain), ...decodeEmbedded(joined)].map(unwrap));
+  return [...new Set([plain, clear, ...decoded])];
+}
+
+/** Hashes of every SHINGLE_WORDS-word window of `w`. */
+function shingles(w: string[], out: Set<string>): void {
+  for (let i = 0; i + SHINGLE_WORDS <= w.length; i++) out.add(digest(w.slice(i, i + SHINGLE_WORDS).join(' ')));
+}
+
+/**
+ * Fingerprints of a text: hashed word shingles plus key-like single words, over each of its forms. Only
+ * hashes are kept, so the tracker never holds (or writes to disk) the data it protects.
+ */
+export function fingerprints(text: string, before: string[] = []): Set<string> {
   const out = new Set<string>();
-  for (const part of [text, ...decodeEmbedded(text)]) {
-    const w = words(part);
-    for (let i = 0; i + SHINGLE_WORDS <= w.length; i++) out.add(digest(w.slice(i, i + SHINGLE_WORDS).join(' ')));
-    for (const t of w) if (RARE_TOKEN.test(t)) out.add(digest(t));
+  for (const [i, form] of forms(text).entries()) {
+    // Words carried over from earlier sink calls join the first form only, so text cut into short pieces
+    // across several calls still forms whole shingles.
+    shingles(i === 0 ? [...before, ...words(form, true)] : words(form, true), out);
+    for (const t of words(form, false)) if (RARE_TOKEN.test(t)) out.add(digest(t));
   }
   return out;
 }
+
+/** The last words a sink sent, kept so the next call is checked as a continuation of it. */
+const tailWords = (text: string, prev: string[]): string[] => [...prev, ...words(unwrap(text), true)].slice(-(SHINGLE_WORDS - 1));
 
 interface Mark {
   label: string;
@@ -90,6 +144,8 @@ interface SharedFile {
 export class TaintTracker {
   private readonly marks: Mark[] = [];
   private shared?: SharedFile;
+  /** Last words that went out through content sinks, so a text cut into short pieces is still caught. */
+  private sentTail: string[] = [];
   /** Tells this tracker's lines in the shared file from other proxies'. */
   private readonly id = randomUUID();
   now: () => number = Date.now;
@@ -119,8 +175,9 @@ export class TaintTracker {
     const hashes = fingerprints(extractText(result));
     const at = this.now();
     for (const label of labels) {
-      this.add({ label, server: this.server, tool, at, hashes });
-      this.publish({ label, tool, at, hashes });
+      // Only hashes the session did not hold yet go to the shared file; a line with none still renews the label.
+      const added = this.add({ label, server: this.server, tool, at, hashes });
+      this.publish({ label, tool, at, hashes: added });
     }
     return [...labels];
   }
@@ -133,13 +190,16 @@ export class TaintTracker {
     const live = this.marks.filter((m) => this.fresh(m) && (sink.labels.length === 0 || sink.labels.includes(m.label)));
     if (live.length === 0) return undefined;
     if (sink.when === 'session') return { ...this.describe(live[live.length - 1]), when: 'session', matches: 0 };
-    const sent = fingerprints(extractText(args));
+    const text = extractText(args);
+    const sent = fingerprints(text, this.sentTail);
     let best: TaintFlow | undefined;
     for (const mark of live) {
       let matches = 0;
       for (const h of sent) if (mark.hashes.has(h)) matches++;
       if (matches >= this.config.minMatches && matches > (best?.matches ?? 0)) best = { ...this.describe(mark), when: 'content', matches };
     }
+    // Only text that was let out continues: a refused call never reached the recipient.
+    if (!best) this.sentTail = tailWords(text, this.sentTail);
     return best;
   }
 
@@ -157,18 +217,27 @@ export class TaintTracker {
     return this.config.ttlMinutes <= 0 || this.now() - m.at < this.config.ttlMinutes * 60_000;
   }
 
-  /** Merges into the newest mark with the same label and origin, so repeated reads do not pile up. */
-  private add(mark: Mark): void {
+  /**
+   * Merges into the mark with the same label and origin, so repeated reads do not pile up; returns the
+   * hashes that were new.
+   */
+  private add(mark: Mark): Set<string> {
     const same = this.marks.find((m) => m.label === mark.label && m.server === mark.server && m.tool === mark.tool);
     if (!same) {
-      this.marks.push({ ...mark, hashes: new Set([...mark.hashes].slice(0, MAX_HASHES)) });
-      return;
+      const hashes = new Set([...mark.hashes].slice(0, MAX_HASHES));
+      this.marks.push({ ...mark, hashes });
+      return hashes;
     }
     same.at = Math.max(same.at, mark.at);
+    const added = new Set<string>();
     for (const h of mark.hashes) {
       if (same.hashes.size >= MAX_HASHES) break;
-      same.hashes.add(h);
+      if (!same.hashes.has(h)) {
+        same.hashes.add(h);
+        added.add(h);
+      }
     }
+    return added;
   }
 
   private openShared(session: string): SharedFile {

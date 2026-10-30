@@ -171,6 +171,7 @@ function compilePaths(raw: unknown, baseDir: string, path: string): PathConstrai
     deny: patterns('deny'),
     base: typeof p.base === 'string' ? resolve(baseDir, p.base) : process.cwd(),
     platform: process.platform,
+    hardLinks: oneOf(p.hardLinks, ['deny', 'allow'] as const, 'deny', `${path}.hardLinks`),
   };
 }
 

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Readable, Writable } from 'node:stream';
 import type { AuditEvent, AuditLog } from './audit.js';
 import type { CodeFingerprint } from './codepin.js';
@@ -62,8 +63,9 @@ type Context = Omit<AuditEvent, 'verdict' | 'reason'>;
 
 /** Prefix of the ids of the firewall's own elicitation requests, so the client's answers are not forwarded. */
 const APPROVAL_ID = 'mcp-firewall-approval-';
-/** Characters of the arguments shown in an approval prompt. */
-const APPROVAL_PREVIEW = 600;
+/** Characters of each argument value shown in an approval prompt, and how many arguments are listed. */
+const APPROVAL_VALUE_CHARS = 200;
+const APPROVAL_MAX_ARGS = 25;
 
 /** A client request awaiting its response; `args` are the non-empty `prompts/get` arguments. */
 interface PendingRequest {
@@ -104,10 +106,22 @@ const definitionMlText = (def: unknown): string => [extractText(def), parameterN
  * before the user reads them (they could hide what the call really sends).
  */
 function approvalMessage(tool: string, args: unknown, why: string): string {
-  const shown = JSON.stringify(stripHiddenChars(args ?? {}).value) ?? '{}';
-  const preview = shown.length > APPROVAL_PREVIEW ? `${shown.slice(0, APPROVAL_PREVIEW)}… (${shown.length} characters)` : shown;
-  return `MCP Firewall: allow the call to '${tool}'?\nWhy it needs approval: ${why}\nArguments: ${preview}`;
+  const clip = (v: unknown): string => {
+    const s = JSON.stringify(v) ?? 'null';
+    return s.length > APPROVAL_VALUE_CHARS ? `${s.slice(0, APPROVAL_VALUE_CHARS)}… (${s.length} characters)` : s;
+  };
+  // One line per argument with every value cut short, so a long harmless value cannot push the one that
+  // matters (a recipient, a URL) out of sight.
+  const clean = stripHiddenChars(args ?? {}).value;
+  const entries = isObject(clean) ? Object.entries(clean) : [['(arguments)', clean] as const];
+  const lines = entries.slice(0, APPROVAL_MAX_ARGS).map(([k, v]) => `  ${oneLine(k)}: ${clip(v)}`);
+  if (entries.length > APPROVAL_MAX_ARGS) lines.push(`  … and ${entries.length - APPROVAL_MAX_ARGS} more arguments`);
+  return `MCP Firewall: allow the call to ${quoted(tool)}?\nWhy it needs approval: ${oneLine(why)}\nArguments:\n${lines.join('\n') || '  (none)'}`;
 }
+
+/** Model-written text on one line, without hidden characters, so it cannot forge the prompt's layout. */
+const oneLine = (s: string): string => String(stripHiddenChars(s).value).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ');
+const quoted = (s: string): string => JSON.stringify(oneLine(s));
 
 export class FirewallProxy {
   /** Requests the client sent, so server responses can be matched to the method that produced them. */
@@ -133,7 +147,6 @@ export class FirewallProxy {
   private clientCanAsk = false;
   /** The firewall's open approval requests, keyed by id, resolved by the client's answer (or undefined on timeout). */
   private readonly approvals = new Map<string, (reply: JsonRpcMessage | undefined) => void>();
-  private approvalSeq = 0;
   /** Tools the user allowed for the rest of the session. */
   private readonly approvedTools = new Set<string>();
 
@@ -330,7 +343,9 @@ export class FirewallProxy {
     };
     if (!this.clientCanAsk) return unavailable('needs user approval but the client cannot ask (no elicitation support)');
 
-    const id = `${APPROVAL_ID}${++this.approvalSeq}`;
+    // Unguessable: a server that could predict it would ask something harmless under this id and the user's
+    // "accept" to that would approve this call.
+    const id = `${APPROVAL_ID}${randomUUID()}`;
     let timer: NodeJS.Timeout | undefined;
     const answer = new Promise<JsonRpcMessage | undefined>((resolve) => {
       this.approvals.set(idKey(id), resolve);
@@ -346,7 +361,7 @@ export class FirewallProxy {
         requestedSchema: {
           type: 'object',
           properties: approval.remember
-            ? { remember: { type: 'boolean', title: `Allow '${tool}' for the rest of this session`, default: false } }
+            ? { remember: { type: 'boolean', title: `Allow ${quoted(tool)} for the rest of this session`, default: false } }
             : {},
         },
       },
@@ -388,6 +403,13 @@ export class FirewallProxy {
       if (msg.method === 'notifications/tools/list_changed') {
         this.audit.record({ direction, method: msg.method, verdict: 'info', reason: 'tool list changed; definitions are re-verified on the next tools/list' });
       } else if (isRequest(msg)) {
+        // The client's answer would be taken for the user's answer to a firewall approval prompt.
+        if (typeof msg.id === 'string' && msg.id.startsWith(APPROVAL_ID)) {
+          const reason = 'server request uses the id space of firewall approval prompts';
+          this.audit.record({ direction, method: msg.method, verdict: 'block', reason });
+          send(this.io.serverIn, errorResponse(msg.id, reason));
+          return;
+        }
         if (SERVER_PROMPTS.has(msg.method)) {
           const refusal = (msg.method === 'sampling/createMessage' && this.limitSampling(msg)) || (await this.inspectServerPrompt(msg));
           if (refusal) {

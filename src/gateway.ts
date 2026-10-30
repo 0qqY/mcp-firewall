@@ -33,6 +33,13 @@ export interface GatewayOptions {
   path: string;
   /** Browser origins allowed besides localhost; any other Origin is refused (DNS rebinding). */
   allowedOrigins: string[];
+  /**
+   * Host names the gateway answers to besides localhost (the address it listens on, when that is not a
+   * loopback one). A rebound DNS name reaches the gateway with its own Host header and no Origin on GET.
+   */
+  allowedHosts?: string[];
+  /** Sessions with no request for this long are closed (most clients disconnect without DELETE). */
+  idleMinutes?: number;
   serverId: string;
   classifier?: () => Promise<Classifier>;
   /** Replaces fetch in tests. */
@@ -40,6 +47,40 @@ export interface GatewayOptions {
 }
 
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+/** Host header without its port: "[::1]:8787" -> "[::1]", "LocalHost:8787" -> "localhost". */
+const hostName = (host: string): string => host.toLowerCase().replace(/:\d+$/, '');
+
+/** Where `Mcp-Name` comes from, per method (MCP 2026-07-28 standard headers). */
+const NAME_SOURCE: Record<string, string> = {
+  'tools/call': 'name',
+  'prompts/get': 'name',
+  'resources/read': 'uri',
+  'tasks/get': 'taskId',
+  'tasks/update': 'taskId',
+  'tasks/cancel': 'taskId',
+};
+
+/** An argument a tool mirrors into an `Mcp-Param-{header}` HTTP header (`x-mcp-header` in its inputSchema). */
+interface ParamHeader {
+  path: string[];
+  header: string;
+}
+
+/** `x-mcp-header` declarations, reachable through `properties` only (as the spec allows). */
+function paramHeaders(schema: unknown, path: string[] = []): ParamHeader[] {
+  if (!isObject(schema) || !isObject(schema.properties)) return [];
+  return Object.entries(schema.properties).flatMap(([key, prop]) => {
+    if (!isObject(prop)) return [];
+    const own = typeof prop['x-mcp-header'] === 'string' ? [{ path: [...path, key], header: prop['x-mcp-header'] }] : [];
+    return [...own, ...paramHeaders(prop, [...path, key])];
+  });
+}
+
+/** A header value: printable ASCII as is, anything else in the spec's Base64 sentinel. */
+function headerValue(v: string): string {
+  return /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/.test(v) ? v : `=?base64?${Buffer.from(v, 'utf8').toString('base64')}?=`;
+}
 
 /** An open client response carrying SSE events: a POST waiting for its responses, or the GET stream. */
 class EventSink {
@@ -77,6 +118,9 @@ class Session {
   /** Server-initiated messages with no open stream to carry them yet. */
   readonly backlog: JsonRpcMessage[] = [];
   upstreamGet?: AbortController;
+  lastSeen = Date.now();
+  /** Per tool, the arguments it mirrors into headers, learnt from the tools/list the client received. */
+  readonly paramHeaders = new Map<string, ParamHeader[]>();
 
   constructor(
     readonly id: string,
@@ -94,12 +138,19 @@ class Session {
       for (const msg of parseMessage(line) ?? []) this.toClient(msg);
     });
     onLines(this.io.serverIn, (line) => {
-      for (const msg of parseMessage(line) ?? []) void gw.toUpstream(this, msg);
+      for (const msg of parseMessage(line) ?? []) {
+        gw.toUpstream(this, msg).catch((err: Error) => gw.options.audit.record({ verdict: 'warn', reason: `gateway: ${err.message}` }));
+      }
     });
   }
 
   /** Routes what the firewall lets through to the client stream that is waiting for it. */
   private toClient(msg: JsonRpcMessage): void {
+    if (isResponse(msg) && isObject(msg.result) && Array.isArray(msg.result.tools)) {
+      for (const tool of msg.result.tools) {
+        if (isObject(tool) && typeof tool.name === 'string') this.paramHeaders.set(tool.name, paramHeaders(tool.inputSchema));
+      }
+    }
     if (isResponse(msg)) {
       const key = idKey(msg.id);
       const sink = this.waiting.get(key);
@@ -125,6 +176,11 @@ class Session {
     send(this.io.serverOut, msg);
   }
 
+  /** Whether a client stream is still open on this session (an idle one may still be listening). */
+  get streaming(): boolean {
+    return [...this.posts, this.getSink].some((s) => s && !s.closed);
+  }
+
   close(): void {
     this.upstreamGet?.abort();
     for (const sink of [...this.posts, this.getSink]) sink?.end();
@@ -135,10 +191,15 @@ class Session {
 export class Gateway {
   private readonly sessions = new Map<string, Session>();
   private readonly fetch: typeof fetch;
+  private readonly hosts: Set<string>;
+  private readonly sweeper: NodeJS.Timeout;
   readonly server: Server;
 
   constructor(readonly options: GatewayOptions) {
     this.fetch = options.fetch ?? fetch;
+    this.hosts = new Set([...LOCAL_HOSTS, ...(options.allowedHosts ?? []).map(hostName)]);
+    const idle = (options.idleMinutes ?? 60) * 60_000;
+    this.sweeper = setInterval(() => this.expire(idle), Math.min(idle, 60_000)).unref();
     this.server = createServer((req, res) => {
       this.handle(req, res).catch((err: Error) => {
         options.audit.record({ verdict: 'warn', reason: `gateway error: ${err.message}` });
@@ -149,14 +210,33 @@ export class Gateway {
   }
 
   close(): void {
+    clearInterval(this.sweeper);
     for (const s of this.sessions.values()) s.close();
     this.sessions.clear();
     this.server.close();
   }
 
+  /** Closes sessions idle for `ms` with no stream open, here and on the remote server. */
+  expire(ms: number): void {
+    const now = Date.now();
+    for (const session of [...this.sessions.values()]) {
+      if (now - session.lastSeen < ms || session.streaming) continue;
+      this.sessions.delete(session.id);
+      session.close();
+      if (session.upstreamSession) {
+        this.fetch(this.options.upstream, { method: 'DELETE', headers: this.upstreamHeaders(session) }).catch(() => undefined);
+      }
+      this.options.audit.record({ verdict: 'info', reason: `gateway: idle session ${session.id} closed` });
+    }
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (url.pathname !== this.options.path) return void res.writeHead(404).end();
+    if (!this.hosts.has(hostName(req.headers.host ?? ''))) {
+      this.options.audit.record({ verdict: 'block', reason: `gateway: request for host ${req.headers.host ?? '(none)'} refused` });
+      return void res.writeHead(421).end();
+    }
     // A web page the user visits can reach a localhost port; only local or allowed origins may talk to MCP.
     const origin = req.headers.origin;
     if (origin && !LOCAL_ORIGIN.test(origin) && !this.options.allowedOrigins.includes(origin)) {
@@ -175,12 +255,14 @@ export class Gateway {
     if (typeof id === 'string') {
       const found = this.sessions.get(id);
       if (!found) res.writeHead(404).end();
+      else found.lastSeen = Date.now();
       return found;
     }
     // A new client session on initialize; clients that never get a session id share one.
     const sid = create ? randomUUID() : 'stateless';
     let session = this.sessions.get(sid);
     if (!session) this.sessions.set(sid, (session = new Session(sid, this)));
+    session.lastSeen = Date.now();
     return session;
   }
 
@@ -261,6 +343,27 @@ export class Gateway {
     res.writeHead(200).end();
   }
 
+  /**
+   * The 2026-07-28 standard headers, built from the message as the firewall forwards it, never copied from
+   * the client: a header mirroring an argument DLP redacted would carry the secret past it (and disagree
+   * with the body, which the server rejects).
+   */
+  private messageHeaders(session: Session, msg: JsonRpcMessage): Record<string, string> {
+    if (typeof msg.method !== 'string') return {};
+    const headers: Record<string, string> = { 'Mcp-Method': msg.method };
+    const params = isObject(msg.params) ? msg.params : {};
+    const field = NAME_SOURCE[msg.method];
+    if (field && typeof params[field] === 'string') headers['Mcp-Name'] = headerValue(params[field]);
+    if (msg.method === 'tools/call' && typeof params.name === 'string') {
+      for (const { path, header } of session.paramHeaders.get(params.name) ?? []) {
+        let v: unknown = params.arguments;
+        for (const k of path) v = isObject(v) ? v[k] : undefined;
+        if (typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))) headers[`Mcp-Param-${header}`] = headerValue(String(v));
+      }
+    }
+    return headers;
+  }
+
   private upstreamHeaders(session: Session, accept = 'application/json, text/event-stream'): Record<string, string> {
     const headers: Record<string, string> = { Accept: accept };
     if (session.upstreamSession) headers['Mcp-Session-Id'] = session.upstreamSession;
@@ -280,7 +383,7 @@ export class Gateway {
     try {
       res = await this.fetch(this.options.upstream, {
         method: 'POST',
-        headers: { ...this.upstreamHeaders(session), 'Content-Type': 'application/json' },
+        headers: { ...this.upstreamHeaders(session), ...this.messageHeaders(session, msg), 'Content-Type': 'application/json' },
         body: JSON.stringify(msg),
       });
     } catch (err) {
@@ -294,8 +397,26 @@ export class Gateway {
       return fail(`remote server answered HTTP ${res.status}${auth}`);
     }
     const type = res.headers.get('content-type') ?? '';
-    if (type.includes('text/event-stream')) return readEvents(res, (m) => session.fromServer(m));
-    const text = await res.text();
+    if (type.includes('text/event-stream')) {
+      let answered = false;
+      try {
+        await readEvents(res, (m) => {
+          if (isResponse(m) && idKey(m.id) === idKey(msg.id)) answered = true;
+          session.fromServer(m);
+        });
+      } catch (err) {
+        // A dropped connection must not leave the client waiting, or reach the event loop as a crash.
+        if (!answered) return fail(`remote server stream broke: ${(err as Error).message}`);
+      }
+      if (!answered && isRequest(msg)) fail('remote server closed the stream without answering');
+      return;
+    }
+    let text: string;
+    try {
+      text = await res.text();
+    } catch (err) {
+      return fail(`remote server response broke: ${(err as Error).message}`);
+    }
     if (!text.trim()) return;
     const messages = parseMessage(text);
     if (!messages) return fail('remote server sent a malformed response');

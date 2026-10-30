@@ -15,7 +15,8 @@ import { TaintTracker } from './taint.js';
 
 const USAGE = `Usage: mcp-firewall [--policy <file>] [--name <server-id>] [--code <path>]... -- <command> [args...]
        mcp-firewall gateway --upstream <url> [--policy <file>] [--name <server-id>] [--listen <host:port>]
-                            [--path </mcp>] [--header "Name: value"]... [--allow-origin <origin>]... [--no-forward-auth]
+                            [--path </mcp>] [--header "Name: value"]... [--allow-origin <origin>]... [--allow-host <name>]...
+                            [--no-forward-auth]
        mcp-firewall dashboard [--policy <file>] [--audit <file>] [--port <port>]
        mcp-firewall pins list [--policy <file>]
        mcp-firewall pins approve --name <server-id> [--policy <file>] [<tool>...]
@@ -32,7 +33,8 @@ Options:
 gateway serves a Streamable HTTP MCP endpoint (default http://127.0.0.1:8787/mcp) in front of a remote
 server, with the same policy checks. --header values may name environment variables as \${VAR}, so
 credentials stay out of client configs. The client's own Authorization header is passed upstream
-unless a --header sets one or --no-forward-auth is given.
+unless a --header sets one or --no-forward-auth is given. Requests whose Host header is not localhost
+(or the --listen address, or an --allow-host name) are refused, which stops DNS rebinding.
 
 pins approve trusts what the firewall saw but held back: changed or held tool definitions and
 prompt templates ('@prompt:<name>#<args>'), and changed server code ('@server-code'). Without
@@ -167,6 +169,7 @@ function runGateway(argv: string[]): void {
   let forwardAuthorization = true;
   const headers: Record<string, string> = {};
   const allowedOrigins: string[] = [];
+  const allowedHosts: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     if (flag === '--no-forward-auth') {
@@ -180,6 +183,7 @@ function runGateway(argv: string[]): void {
     else if (flag === '--listen') listen = value;
     else if (flag === '--path') path = value.startsWith('/') ? value : `/${value}`;
     else if (flag === '--allow-origin') allowedOrigins.push(value);
+    else if (flag === '--allow-host') allowedHosts.push(value);
     else if (flag === '--header') {
       const [k, v] = parseHeader(value);
       headers[k] = v;
@@ -202,7 +206,8 @@ function runGateway(argv: string[]): void {
   const audit = new AuditLog(policy.audit.enabled ? policy.audit.file : undefined, policy.audit.logAllowed, serverId);
   const pins = policy.pinning.enabled ? new PinStore(policy.pinning.file, serverId) : undefined;
   const classifier = classifierLoader(policy, audit, () => gateway.close());
-  const gateway = new Gateway({ policy, audit, pins, upstream, headers, forwardAuthorization, path, allowedOrigins, serverId, classifier });
+  if (!/^(127\.\d+\.\d+\.\d+|localhost|::1|\[::1\]|0\.0\.0\.0|::)$/i.test(host)) allowedHosts.push(host);
+  const gateway = new Gateway({ policy, audit, pins, upstream, headers, forwardAuthorization, path, allowedOrigins, allowedHosts, serverId, classifier });
   if (!/^(127\.\d+\.\d+\.\d+|localhost|::1|\[::1\])$/i.test(host)) {
     process.stderr.write(`mcp-firewall: warning: listening on ${host}, reachable from other machines; the gateway has no authentication of its own\n`);
   }

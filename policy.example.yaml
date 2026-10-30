@@ -34,6 +34,7 @@ tools:
       paths:
         arguments: [path]               # yol tutan argümanlar (string ya da string listesi)
         deny: ['**/.ssh', '**/.aws/credentials', '**/.env', '**/*.pem']
+        # hardLinks: deny          # birden çok adı olan dosyalar reddedilir (varsayılan); pnpm deposu gibi durumlar için allow
         # allow: ['~/projeler']         # tanımlanırsa yol bunlardan birinin altında olmak zorunda
         # base: .                       # göreli yollar için dizin (varsayılan: firewall'un çalışma dizini)
 

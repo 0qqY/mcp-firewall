@@ -156,3 +156,33 @@ test('proxy: warn and monitor modes log the flow but forward the call', async ()
     assert.equal((await h.atServer.next()).id, 2);
   }
 });
+
+test('content flow survives invisible characters, full-width letters and JSON escapes', () => {
+  const t = tracker();
+  t.markResult('read_file', result(SECRET_DOC), false);
+  const hidden = SECRET_DOC.split(' ').map((w) => [...w].join('\u200b')).join(' ');
+  assert.ok(t.checkSink('send_email', { body: hidden }), 'zero-width spaces inside words');
+  const wide = SECRET_DOC.replace(/[!-~]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0));
+  assert.ok(t.checkSink('send_email', { body: wide }), 'full-width letters');
+  const escaped = JSON.stringify({ note: SECRET_DOC.replace(/ /g, '\n') });
+  assert.ok(t.checkSink('send_email', { payload: escaped }), 'a JSON document with \n between the words');
+});
+
+test('base64 wrapped at a fixed width is joined before decoding', () => {
+  const t = tracker();
+  t.markResult('read_file', result(SECRET_DOC), false);
+  const b64 = Buffer.from(SECRET_DOC).toString('base64');
+  const wrapped = b64.replace(/(.{20})/g, '$1\n');
+  assert.equal(t.checkSink('send_email', { body: wrapped.split('\n').slice(0, 1).join('') }), undefined, 'one line alone is no flow');
+  assert.ok(t.checkSink('send_email', { body: wrapped }));
+  assert.ok(t.checkSink('send_email', { body: `-----BEGIN DATA-----\n${wrapped}\n-----END DATA-----` }), 'PEM-style armour');
+});
+
+test('a text cut into short pieces over several calls is caught', () => {
+  const t = tracker();
+  t.markResult('read_file', result(SECRET_DOC), false);
+  const words = SECRET_DOC.split(' ');
+  let caught = false;
+  for (let i = 0; i < words.length && !caught; i += 4) caught = Boolean(t.checkSink('send_message', { text: words.slice(i, i + 4).join(' ') }));
+  assert.ok(caught, 'pieces shorter than one shingle');
+});

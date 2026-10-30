@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -109,4 +109,20 @@ test('Windows 8.3 short names resolve to the long name', { skip: process.platfor
 
 test('a paths block must name its arguments', () => {
   assert.throws(() => compilePolicy({ tools: { rules: [{ match: 'x', action: 'allow', paths: { allow: ['/a'] } }] } }, top), PolicyError);
+});
+
+test('a hard link inside the root to a file outside is refused unless hardLinks: allow', () => {
+  writeFileSync(join(outside, 'hl-target.txt'), 's');
+  linkSync(join(outside, 'hl-target.txt'), join(root, 'docs', 'hl.txt'));
+  const reason = read('docs/hl.txt');
+  assert.equal(reason.allowed, false);
+  assert.match(reason.reason!, /2 hard links/);
+  assert.equal(allowed('docs/a.md'), true, 'files with one name pass');
+  assert.equal(allowed('docs'), true, 'directories are not counted');
+  const trusting = compilePolicy(
+    { tools: { rules: [{ match: 'read_file', action: 'allow', paths: { arguments: ['path'], base: root, allow: [root], hardLinks: 'allow' } }] } },
+    top,
+  );
+  assert.equal(evaluateToolCall(trusting, 'read_file', { path: 'docs/hl.txt' }).allowed, true);
+  assert.throws(() => compilePolicy({ tools: { rules: [{ match: 'x', action: 'allow', paths: { arguments: ['p'], hardLinks: 'ask' } }] } }, top), PolicyError);
 });

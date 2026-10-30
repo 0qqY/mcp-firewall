@@ -199,6 +199,13 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
     yerel bir HTTP uç noktası koyuyor; her istemci oturumu kendi firewall örneğiyle bütün kontrollerden geçiyor.
     `Origin` denetimi (DNS rebinding), yalnızca localhost'ta dinleme ve ortam değişkeninden okunan başlıklar var.
     Kalan sınırlar: OAuth keşfi, akış sürdürme ve uzak sunucuda kod sabitleme. 127/127 test (ML modeli testi hariç).
+26. Farklı yöntemlerle yeniden test (30.10.2026): işletim sistemine sorarak 120 bin yol yazımı, gerçek metinde taint
+    ölçümü, saldırı senaryoları, resmî SDK v2 sunucusu ve Claude Code ile birlikte çalışma, çok süreçli yük ve
+    mutasyon testi. Bulunup kapatılanlar: hard link ile kök dışına çıkma (`paths.hardLinks`), onay penceresinin
+    sahte cevapla geçilmesi (tahmin edilebilir id), uzun argümanla gizlenen alıcı ve tool adıyla sahte satır, DNS
+    rebinding (`Host` denetimi), kopan uzak akışta asılı kalma, kapanmayan oturumlar, SDK v2 tool'larının `$schema`
+    yüzünden zehirli sayılması, 2026 başlıklarının eksikliği ve taint'in büyük harf, JSON kaçışı, HTML, görünmez
+    karakter, satırlara bölünmüş/PEM base64, camelCase ve parça parça gönderimi kaçırması. 139/139 test (ML dahil).
 
 **Sıradakiler:**
 

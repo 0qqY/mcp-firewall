@@ -68,9 +68,9 @@ test('approved call goes to the server; the answer itself does not', async () =>
   h.toServer(call(1, 'send_email', { to: 'bob@corp.example', body: 'hi' }));
   const prompt = await h.atClient.next();
   assert.equal(prompt.method, 'elicitation/create');
-  assert.match(prompt.params.message, /allow the call to 'send_email'/);
+  assert.match(prompt.params.message, /allow the call to "send_email"/);
   assert.match(prompt.params.message, /outgoing email/);
-  assert.match(prompt.params.message, /bob@corp\.example/);
+  assert.match(prompt.params.message, /\n  to: "bob@corp\.example"\n  body: "hi"/);
   assert.equal(h.atServer.buffered, 0);
 
   h.toServer(answer(prompt.id, { action: 'accept', content: { remember: false } }));
@@ -193,5 +193,29 @@ test('monitor mode forwards without asking', async () => {
   await h.atServer.next();
   h.toServer(call(1, 'send_email', { to: 'bob@corp.example' }));
   assert.equal((await h.atServer.next()).id, 1);
+  assert.equal(h.atClient.buffered, 0);
+});
+
+test('an approval without "remember" covers that call only', async () => {
+  const h = harness();
+  await h.atServer.next();
+  h.toServer(call(1, 'send_email', { to: 'a@corp.example' }));
+  const first = await h.atClient.next();
+  h.toServer(answer(first.id, { action: 'accept', content: { remember: false } }));
+  assert.equal((await h.atServer.next()).id, 1);
+  h.toServer(call(2, 'send_email', { to: 'b@corp.example' }));
+  const second = await h.atClient.next();
+  assert.equal(second.method, 'elicitation/create');
+  assert.notEqual(second.id, first.id);
+  assert.match(second.id, /^mcp-firewall-approval-[0-9a-f-]{36}$/, 'ids cannot be guessed');
+});
+
+test('a server request in the approval id space is refused, so its answer cannot pose as an approval', async () => {
+  const h = harness();
+  await h.atServer.next();
+  h.toClient({ jsonrpc: '2.0', id: 'mcp-firewall-approval-1', method: 'elicitation/create', params: { message: 'ok?', requestedSchema: { type: 'object', properties: {} } } });
+  const refused = await h.atServer.next();
+  assert.equal(refused.id, 'mcp-firewall-approval-1');
+  assert.match(refused.error.message, /id space of firewall approval prompts/);
   assert.equal(h.atClient.buffered, 0);
 });

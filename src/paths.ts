@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,11 @@ export interface PathConstraint {
   /** Relative argument values resolve against this directory (the server's working directory). */
   base: string;
   platform: NodeJS.Platform;
+  /**
+   * A hard link is the same file under a second name, which no path spelling reveals: `deny` refuses
+   * existing files with more than one name (nlink > 1), `allow` trusts the name.
+   */
+  hardLinks: 'deny' | 'allow';
 }
 
 const GLOB_CHARS = /[*?]/;
@@ -142,6 +147,12 @@ export function checkPaths(c: PathConstraint, args: Record<string, unknown>): st
         if (denied) return `argument '${name}' resolves to '${form}', denied by path '${denied.source}'`;
         if (c.allow.length > 0 && !c.allow.some((p) => p.match.test(form))) {
           return `argument '${name}' resolves to '${form}', outside the allowed paths`;
+        }
+      }
+      if (c.hardLinks === 'deny' && c.platform === process.platform && !forms[0].startsWith('//')) {
+        const st = statSync(forms[0], { throwIfNoEntry: false });
+        if (st?.isFile() && st.nlink > 1) {
+          return `argument '${name}' names a file with ${st.nlink} hard links; its other names may be outside the allowed paths`;
         }
       }
     }

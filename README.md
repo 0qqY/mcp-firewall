@@ -101,8 +101,14 @@ ornek http://127.0.0.1:8787/mcp`).
 - `--header` değerlerindeki `${DEĞİŞKEN}` ortam değişkeninden okunur; token istemci yapılandırmasına yazılmaz. Böyle
   bir başlık yoksa istemcinin kendi `Authorization` başlığı iletilir (`--no-forward-auth` kapatır).
 - Varsayılan dinleme adresi `127.0.0.1:8787` (`--listen`). Tarayıcıdan gelen ve `Origin`'i localhost olmayan
-  istekler reddedilir (DNS rebinding); izin verilecek kökenler `--allow-origin` ile eklenir. Gateway'in kendi kimlik
-  doğrulaması yoktur: başka bir adreste dinletilirse uyarı verir.
+  istekler reddedilir; izin verilecek kökenler `--allow-origin` ile eklenir. `Host` başlığı localhost, `--listen`
+  adresi ya da `--allow-host` ile verilen bir ad değilse istek 421 ile reddedilir (DNS rebinding). Gateway'in kendi
+  kimlik doğrulaması yoktur: başka bir adreste dinletilirse uyarı verir.
+- MCP 2026-07-28'in zorunlu başlıkları (`Mcp-Method`, `Mcp-Name`, `x-mcp-header` ile işaretli argümanlar için
+  `Mcp-Param-*`) istemciden kopyalanmaz, firewall'un ilettiği (DLP'den geçmiş) gövdeden yeniden üretilir; ASCII
+  olmayan değerler base64 biçiminde gider. Böylece maskelenen bir secret başlıkta kalmaz.
+- 60 dakika boyunca hiçbir istek ya da açık akışı olmayan oturumlar iki tarafta da kapatılır. Uzak sunucunun akışı
+  cevap gelmeden koparsa istemci asılı kalmaz, JSON-RPC hatası alır.
 - Sınırlar: OAuth keşfi (401 + `WWW-Authenticate` ile tarayıcıda giriş) gateway üzerinden yapılamaz; token'ı
   `--header` ile verin. Kopan SSE akışını sürdürme (`Last-Event-ID`) desteklenmiyor. Sunucu kodu sabitleme uzak
   sunucuda uygulanamaz (kod görünmüyor).
@@ -130,6 +136,9 @@ göreceği biçime getirir, sonra karşılaştırır:
   köke uymadıkları için reddedilirler. Diğer aygıt yolları (`\\.\pipe\`, `\\?\GLOBALROOT`) da reddedilir.
 - Kalıplarda `**` dizin aşar, `*` ve `?` aşmaz; bir kalıp eşleştiği dizinin altındaki her şeyi de kapsar.
   Windows ve macOS'ta büyük-küçük harf duyarsızdır.
+- Hard link aynı dosyanın ikinci adıdır ve hiçbir yazım bunu ele vermez: izinli kökteki bir hard link kök dışındaki
+  bir dosyayı açabilir. `hardLinks: deny` (varsayılan) birden çok adı olan (nlink > 1) var olan dosyaları reddeder;
+  hard link'le dosya paylaşan araçlar (pnpm deposu gibi) izinli kökteyse `hardLinks: allow` verin.
 - Sınır: denetim çağrı anındadır. Denetimden sonra, sunucu dosyayı açmadan önce bağ değiştirilirse (TOCTOU) bunu
   yakalayamaz; sunucunun kendi kök kısıtıyla birlikte kullanın.
 
@@ -151,9 +160,12 @@ taint:
 ```
 
 - `content`: çıkış tool'unun argümanları, daha önce okunan metinden 8 kelimelik bir dizi ya da anahtara benzeyen uzun
-  bir kelime (16+ karakter, harf ve rakam) içeriyorsa çağrı engellenir. Karşılaştırma büyük-küçük harf ve noktalamadan
-  bağımsızdır; base64, hex ve %XX ile kodlanmış argümanlar çözülüp ayrıca denetlenir. Metnin kendisi değil yalnızca
-  SHA-256 özetleri tutulur.
+  bir kelime (16+ karakter, harf ve rakam) içeriyorsa çağrı engellenir. Karşılaştırmadan önce metin sadeleştirilir:
+  büyük-küçük harf (Türkçe `I/ı` dahil), noktalama, aksanlar, görünmez karakterler, tam genişlikli harfler, JSON
+  kaçışları (`\n`, `\u0041`), HTML etiketleri ve varlıkları, camelCase ve leetspeak. base64 (satırlara bölünmüş ve
+  PEM başlıklı olanlar dahil), hex ve %XX ile kodlanmış argümanlar çözülüp ayrıca denetlenir. Kısa parçalara bölünüp
+  art arda çağrılarla gönderilen metin de yakalanır: her çağrı öncekinin son kelimeleriyle birlikte denetlenir.
+  Metnin kendisi değil yalnızca SHA-256 özetleri tutulur.
 - `session`: etiket bir kez alındıktan sonra o tool'a yapılan her çağrı engellenir ("lethal trifecta" kuralı:
   özel veriyi okuyan oturum dışarı yazamaz). Kesin ama katıdır; yalnızca gerçekten dışarı açılan tool'lara verin.
 - DLP'nin bir şey bulduğu her sonuç `secret` etiketini de alır (`dlpLabel`, boş bırakılırsa kapanır). Etiket,
@@ -164,8 +176,9 @@ taint:
   varsa her sunucuya `MCP_FIREWALL_SESSION` ortam değişkeniyle aynı değeri verin. `scope: server` etiketleri tek
   sunucuda tutar.
 - Etiketler `ttlMinutes` (varsayılan 60) sonra düşer. `action: warn` yalnızca loglar; `mode: monitor` da engellemez.
-- Sınır: model metni kendi sözleriyle yeniden yazar, özetler ya da başka bir dile çevirirse `content` modu bunu
-  yakalayamaz; bu durumlar için `session` modu var. Yalnızca `tools/call` sonuçları kaynak olabilir (resource
+- Sınır: model metni kendi sözleriyle yeniden yazar, özetler, başka bir dile çevirir, kelimelerin arasına dolgu
+  kelimeler koyar, ters çevirir ya da ROT13 gibi bir şifreyle değiştirirse `content` modu bunu yakalayamaz; bu
+  durumlar için `session` modu var. Yalnızca `tools/call` sonuçları kaynak olabilir (resource
   okumaları henüz değil).
 
 ### Kullanıcı onayı (`ask`)
@@ -187,7 +200,8 @@ approval:
 ```
 
 - Firewall çağrıyı sunucuya iletmez, istemciye `elicitation/create` gönderir. İstemci (ör. Claude Code) kullanıcıya
-  tool adını, sebebi ve argümanların ilk 600 karakterini gösterir. Argümanlardaki görünmez karakterler ve terminal
+  tool adını, sebebi ve her argümanı ayrı satırda gösterir (değer başına 200 karakter, en çok 25 argüman): uzun bir
+  argüman sonrakileri pencerenin dışına itemez. Tool adı ve argümanlar tek satıra indirilir, sahte satır eklenemez. Argümanlardaki görünmez karakterler ve terminal
   kaçış kodları bu metinden silinir, böylece model gönderdiği içeriği kullanıcıdan gizleyemez. DLP'nin maskelediği
   secret'lar maskeli görünür.
 - Kullanıcı kabul ederse çağrı sunucuya gider. Reddederse, pencereyi kapatırsa ya da süre dolarsa model "Blocked"
@@ -729,8 +743,9 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 - Description taraması kalıp tabanlıdır; yeni ifade biçimlerini kaçırabilir.
 - `ask` onayı istemcinin elicitation desteğine bağlıdır; desteklemeyen istemcide `approval.fallback` uygulanır.
   Kullanıcı her pencereyi okumadan onaylarsa (onay yorgunluğu) koruma zayıflar; `ask`'ı az sayıda tool'a verin.
-- `taint` içerik modu kelimesi kelimesine taşınan metni yakalar; özetlenmiş, yeniden yazılmış ya da çevrilmiş veriyi
-  yakalamaz (bunun için `when: session`).
+- `taint` içerik modu kelimesi kelimesine (ya da kodlanmış/gizlenmiş biçimde) taşınan metni yakalar; özetlenmiş,
+  yeniden yazılmış, çevrilmiş, dolgu kelimelerle bölünmüş ya da şifrelenmiş veriyi yakalamaz (bunun için
+  `when: session`).
 - JSON-RPC batch'leri tek tek mesajlar olarak iletilir.
 - ML sınıflandırıcısı da bir modeldir: adversarial girdilerle atlatılabilir, bu yüzden tek savunma hattı değildir.
 

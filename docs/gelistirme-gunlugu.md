@@ -297,3 +297,25 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     Statik başlık istemcinin `Authorization`'ını geçersiz kılıyor. ML yükleyicisi paylaşılıyor (oturum başına
     model yüklenmiyor); CLI'deki yükleme kodu stdio ile ortak `classifierLoader`'a taşındı. `test/gateway.test.ts`
     7 test (sahte uzak sunucuyla), toplam 127/127 (ML modeli testi hariç). Gerçek CLI ile uçtan uca denendi.
+68. **Farklı yöntemlerle yeniden test (30.10.2026):** önceki testler örnek girdilerle yazılmıştı; bu kez sonucu
+    dışarıdan bir doğruluk kaynağıyla karşılaştıran yöntemler kullanıldı.
+    - `paths`: 120 bin yol yazımı üretilip her birinin hangi dosyayı açtığı işletim sistemine soruldu (dosya
+      kimliği); sızıntı yalnızca hard link'te çıktı. `paths.hardLinks` (varsayılan `deny`, nlink > 1) eklendi.
+    - `taint`: gerçek belgelerde 20 gizleme biçimiyle yakalama oranı ölçüldü. Büyük Türkçe harfler, JSON kaçışları,
+      HTML, görünmez karakterler, tam genişlikli ve Kiril harfler, satırlara bölünmüş ve PEM başlıklı base64,
+      leetspeak, camelCase ve kısa parçalara bölünmüş gönderim kaçıyordu; metin sadeleştirme ve çağrılar arası
+      son kelimeler eklendi. Ortak dosyaya yalnızca yeni özetler yazılıyor (dosya büyümesi). Kalan sınırlar:
+      dolgu kelimeler, ters çevirme, ROT13, çeviri ve yeniden yazma.
+    - Onay: firewall'un istek id'si tahmin edilebiliyordu ve sunucu aynı id ile kendi isteğini gönderip kullanıcının
+      cevabını onay gibi kullandırabiliyordu; id'ler rastgele (UUID), bu aralıktaki sunucu istekleri reddediliyor.
+      600 karakterlik önizleme uzun bir argümanla alıcıyı gizleyebiliyordu, tool adındaki satır sonu sahte satır
+      ekleyebiliyordu; argümanlar ayrı satırlarda, tek satıra indirilmiş olarak gösteriliyor.
+    - Gateway: `Host` denetimi (421, `--allow-host`), boşta kalan oturumların kapanması, kopan uzak akışta hata
+      cevabı, 2026-07-28 başlıklarının (`Mcp-Method`, `Mcp-Name`, `Mcp-Param-*`) iletilen gövdeden üretilmesi.
+      Resmî SDK v2 sunucusunun tool'ları `$schema` URL'si yüzünden zehirli sayılıyordu; JSON Schema anahtar
+      kelimeleri taramadan çıkarıldı.
+    - Birlikte çalışma: resmî SDK v2 sunucusu, gerçek dosya sistemi sunucusu ve Claude Code el sıkışmasıyla 13/13.
+      Yük: 12 süreç aynı taint dosyasına yazarken bozuk satır 0; 500 eşzamanlı çağrıda yanlış alıcıya giden cevap 0.
+    - Mutasyon testi: koda 44 küçük hata tek tek sokuldu. İlk turda 42 hatanın 14'ü testlerden kaçıyordu; yeni testlerle
+      kaçan tek hata UNC yolunun dosya sistemine sorulması (sonucu değiştirmiyor, yalnızca yan etkisi var). Toplam
+      139/139 test (ML dahil).

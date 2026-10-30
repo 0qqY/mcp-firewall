@@ -72,9 +72,21 @@ export function parameterNamesText(def: unknown): string {
     .join('\n');
 }
 
+/**
+ * Schema bookkeeping that carries no wording: SDKs stamp every inputSchema with
+ * `"$schema": "https://json-schema.org/..."`, which turned "Send a message" into "send ... https://".
+ */
+const SCHEMA_META = new Set(['$schema', '$id', '$ref', '$anchor', '$dynamicRef', '$dynamicAnchor']);
+
+function definitionStrings(v: unknown): string[] {
+  if (Array.isArray(v)) return v.flatMap(definitionStrings);
+  if (isObject(v)) return Object.entries(v).flatMap(([k, x]) => (SCHEMA_META.has(k) && typeof x === 'string' ? [] : definitionStrings(x)));
+  return collectStrings(v);
+}
+
 /** Everything the model reads from a tool, prompt or resource definition. */
 export function definitionText(def: unknown): string {
-  return [...collectStrings(def), parameterNamesText(def)].join('\n');
+  return [...definitionStrings(def), parameterNamesText(def)].join('\n');
 }
 
 /** First matching rule wins, like a firewall ACL. */
