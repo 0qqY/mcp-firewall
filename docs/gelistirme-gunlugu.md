@@ -319,3 +319,20 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     - Mutasyon testi: koda 44 küçük hata tek tek sokuldu. İlk turda 42 hatanın 14'ü testlerden kaçıyordu; yeni testlerle
       kaçan tek hata UNC yolunun dosya sistemine sorulması (sonucu değiştirmiyor, yalnızca yan etkisi var). Toplam
       139/139 test (ML dahil).
+69. **SIEM çıktısı: syslog ve OTLP (31.10.2026):** yeni `src/siem.ts` ve `audit.siem` politika bloğu. `AuditLog`
+    her kaydı JSONL dosyasının yanında sink'lere de veriyor; varsayılan olarak `allow` kayıtları ve ML alıntıları
+    gönderilmiyor. Syslog RFC 5424 (MSGID = karar, mesaj = JSON), UDP'de 8 KB sınırı ve kısaltma, TCP/TLS'te
+    octet-counting; TLS sertifikası her zaman doğrulanıyor (`ca` ile özel CA). OTLP/HTTP JSON, saniyede bir toplu
+    istek, 429/5xx'te artan aralıklarla tekrar. İki sink de sınırlı kuyrukla çalışıyor (`queueLimit`, en eski
+    düşer, sayısı stderr'e). Firewall çıkarken (`child exit`, gateway SIGINT/SIGTERM) kuyruğa en çok 2 sn veriliyor:
+    istemci çağrıdan hemen sonra kapansa da son kayıt gidiyor. OTLP başlıklarında `${VAR}`, tanımsızsa politika
+    hatası. Testler gerçek UDP/TCP/TLS (openssl ile üretilen sertifika) ve HTTP alıcılarıyla:
+    satır/alan sahteleme, kapalı alıcıda sıralı teslim ve yeniden bağlanma, 5000 kayıtta kuyruk sınırı, güvenilmeyen
+    sertifikanın reddi, 503/429 tekrarı ve 400'de düşürme. Gerçek CLI ile uçtan uca: engellenen çağrının kaydı
+    firewall kapanmadan iki alıcıya da ulaştı, token stderr'de görünmedi.
+    Gerçek bir SIEM ile deneme: OpenObserve (Docker, yalnızca 127.0.0.1) OTLP'yi doğrudan aldı; ML, DLP, kural ve
+    zehirli tool kayıtları SQL ile sorgulanabildi, alıntı alanı gelmedi. OpenObserve'ün syslog alıcısı kaldırıldığı
+    için önüne Fluent Bit kondu; burada bulunan: Fluent Bit ve düz TCP rsyslog octet-counting değil satır sonu
+    çerçevesi bekliyor. `syslog.framing: newline` eklendi (JSON mesajda ham satır sonu olmadığından güvenli). TCP ve
+    UDP ile her çalıştırmanın 13 kaydı da ulaştı. SIEM kapalıyken oturum aynı kararlarla sürdü, uyarı stderr'e yazıldı.
+    `test/siem.test.ts` 11 test, toplam 150/150 (ML dahil).

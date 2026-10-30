@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import spawn from 'cross-spawn';
 import { AuditLog } from './audit.js';
+import { openSinks } from './siem.js';
 import { startDashboard } from './dashboard/server.js';
 import type { Classifier } from './ml/classifier.js';
 import { loadTransformersClassifier } from './ml/transformers.js';
@@ -123,6 +124,18 @@ function runDashboard(argv: string[]): void {
   });
 }
 
+/** The audit log with the policy's SIEM sinks; they never hold up or stop the firewall. */
+function openAudit(policy: Policy, serverId: string): AuditLog {
+  const siem = policy.audit.siem;
+  const sinks = openSinks(siem, (message) => process.stderr.write(`mcp-firewall: ${message}
+`));
+  return new AuditLog(policy.audit.enabled ? policy.audit.file : undefined, policy.audit.logAllowed, serverId, process.stderr, {
+    sinks,
+    logAllowed: siem?.logAllowed ?? false,
+    excerpt: siem?.excerpt ?? false,
+  });
+}
+
 /** The ML loader; memoised, so a gateway with many sessions loads the model once. A model that cannot load stops the firewall. */
 function classifierLoader(policy: Policy, audit: AuditLog, onFail: () => void): (() => Promise<Classifier>) | undefined {
   if (!policy.ml.enabled) return undefined;
@@ -203,7 +216,7 @@ function runGateway(argv: string[]): void {
 
   const policy = loadPolicy(policyFile);
   const serverId = name ?? upstream.origin + upstream.pathname;
-  const audit = new AuditLog(policy.audit.enabled ? policy.audit.file : undefined, policy.audit.logAllowed, serverId);
+  const audit = openAudit(policy, serverId);
   const pins = policy.pinning.enabled ? new PinStore(policy.pinning.file, serverId) : undefined;
   const classifier = classifierLoader(policy, audit, () => gateway.close());
   if (!/^(127\.\d+\.\d+\.\d+|localhost|::1|\[::1\]|0\.0\.0\.0|::)$/i.test(host)) allowedHosts.push(host);
@@ -218,7 +231,7 @@ function runGateway(argv: string[]): void {
     audit.record({ verdict: 'info', reason: `gateway started in ${policy.mode} mode: http://${listen}${path} -> ${upstream!.href}` });
     process.stderr.write(`MCP Firewall gateway: http://${listen}${path} -> ${upstream!.href}\n`);
   });
-  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => (gateway.close(), process.exit(0)));
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => (gateway.close(), void audit.flush().finally(() => process.exit(0))));
 }
 
 async function main(): Promise<void> {
@@ -272,7 +285,7 @@ async function main(): Promise<void> {
   }
 
   const serverId = options.name ?? [options.command, ...options.args].join(' ');
-  const audit = new AuditLog(policy.audit.enabled ? policy.audit.file : undefined, policy.audit.logAllowed, serverId);
+  const audit = openAudit(policy, serverId);
   const pins = policy.pinning.enabled ? new PinStore(policy.pinning.file, serverId) : undefined;
 
   // The proxy calls this once the handshake has been answered.
@@ -285,7 +298,8 @@ async function main(): Promise<void> {
     process.exit(1);
   });
   child.on('exit', (code, signal) => {
-    process.stdout.write('', () => process.exit(code ?? (signal ? 1 : 0)));
+    // Records still on their way to the SIEM get a moment to leave.
+    void audit.flush().finally(() => process.stdout.write('', () => process.exit(code ?? (signal ? 1 : 0))));
   });
   child.stdin!.on('error', () => {
     // The server went away; its exit handler ends the firewall.

@@ -206,6 +206,12 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
     rebinding (`Host` denetimi), kopan uzak akışta asılı kalma, kapanmayan oturumlar, SDK v2 tool'larının `$schema`
     yüzünden zehirli sayılması, 2026 başlıklarının eksikliği ve taint'in büyük harf, JSON kaçışı, HTML, görünmez
     karakter, satırlara bölünmüş/PEM base64, camelCase ve parça parça gönderimi kaçırması. 139/139 test (ML dahil).
+27. SIEM çıktısı (31.10.2026): audit kayıtları syslog (RFC 5424; UDP, TCP, doğrulanmış TLS) ya da OTLP/HTTP ile
+    merkezi log sistemine gidiyor; bir saldırı girişimi tek makinedeki dosyada kalmıyor. Kayıtlar JSON olarak
+    kaçışlandığı için kötü niyetli bir sunucu tool adı ya da hata metniyle SIEM'de sahte kayıt üretemiyor. ML'yi
+    tetikleyen metin varsayılan olarak gönderilmiyor. Alıcı kapalıyken firewall beklemiyor. Kalan sınır: dosya ve
+    kuyruk yerel; makineyi ele geçiren biri kayıtları gönderilmeden silebilir. OpenObserve ve Fluent Bit ile gerçek
+    SIEM'de denendi. 150/150 test (ML dahil).
 
 **Sıradakiler:**
 

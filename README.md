@@ -271,6 +271,45 @@ sunucularda `warn` veya `off` kullanılmalı.
 | `src/codepin.ts` | Sunucu kodunu bulma (npx önbelleği, uv/pipx ortamları, yerel script) ve hash'leme |
 | `src/decode.ts` | Metin içindeki kodlanmış parçaları çözme ve karakter düzeyinde gizlemeyi geri alma |
 | `src/audit.ts` | JSONL audit log |
+| `src/siem.ts` | Audit kayıtlarını syslog (UDP/TCP/TLS) ve OTLP/HTTP ile SIEM'e gönderme |
+
+## SIEM'e gönderme (syslog / OTLP)
+Audit kayıtlarının bir kopyası merkezi bir log sistemine (Splunk, Elastic, Graylog, Wazuh, Sentinel ya da bir
+OpenTelemetry toplayıcısı) gönderilebilir. JSONL dosyası her durumda yazılmaya devam eder.
+
+```yaml
+audit:
+  siem:
+    syslog:
+      target: tls://siem.sirket.example:6514   # udp://…:514, tcp://…:601 ya da tls://…:6514
+      facility: local0                          # varsayılan local0
+      ca: ./siem-ca.pem                         # yalnızca tls; verilmezse sistemin sertifika deposu
+      framing: octet-counting                   # tcp/tls: octet-counting (standart) | newline (Fluent Bit, düz TCP rsyslog)
+    otlp:
+      endpoint: https://otel.sirket.example/v1/logs
+      headers:
+        Authorization: "Bearer ${OTEL_TOKEN}"   # ortam değişkeninden; tanımsızsa firewall başlamaz
+    logAllowed: false     # allow kayıtlarını da gönder (her MCP mesajı bir kayıt: yüksek hacim)
+    excerpt: false        # ML'yi tetikleyen metni de gönder (güvenilmeyen, özel olabilecek içerik)
+    queueLimit: 1000      # alıcıya ulaşılamazken bekletilen kayıt sayısı; fazlası en eskiden düşer
+```
+
+- Syslog RFC 5424 biçimindedir: MSGID kararın kendisi (`block`, `redact`, `warn`…), mesaj kaydın JSON hâli. Önem
+  derecesi: `block` warning, bulgular notice, diğerleri informational. TCP ve TLS'te çerçeveleme octet-counting
+  (RFC 6587 / RFC 5425), UDP'de her kayıt bir datagram (8 KB'ı aşan kaydın metni kısaltılır, `truncated: true`).
+  Sunucunun seçtiği metin (tool adı, sebep) JSON içinde kaçışlandığı için alıcıda sahte bir log satırı ya da alanı
+  üretemez.
+- OTLP, OpenTelemetry'nin log protokolüdür (HTTP + JSON). Kayıtlar saniyede en çok bir istekte toplanır; alanlar
+  `mcp.server`, `mcp.verdict`, `mcp.method`, `mcp.tool`, `mcp.ml.score` öznitelikleri, sebep de kaydın gövdesidir.
+  429 ve 5xx yanıtlarında tekrar denenir, diğer hatalarda o kayıtlar düşer.
+- Gönderim firewall'u hiçbir zaman bekletmez ya da durdurmaz: alıcı kapalıyken kayıtlar sınırlı bir kuyrukta bekler,
+  bağlantı artan aralıklarla yeniden kurulur, düşen kayıt sayısı stderr'e yazılır. Firewall kapanırken kuyruktakilere
+  en çok 2 saniye verilir.
+- Başka bir makineye şifresiz (`udp://`, `tcp://`, `http://`) gönderimde başlangıçta uyarı verilir.
+- Yerelde denemek için: tek container'lık [OpenObserve](https://openobserve.ai) OTLP'yi doğrudan alır
+  (`endpoint: http://127.0.0.1:5080/api/default/v1/logs`, `headers: { Authorization: "Basic ${OO_AUTH}", stream-name:
+  mcp_firewall }`). OpenObserve'ün kendi syslog alıcısı Ağustos 2025'te kaldırıldı; syslog için önüne Fluent Bit
+  (`framing: newline`) ya da AxoSyslog konur.
 
 ## Panel (dashboard)
 
@@ -755,7 +794,7 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 3. Oturum bazlı taint tracking — yapıldı (30.10.2026, yukarıda "Veri akışı takibi")
 4. Riskli çağrılar için human-in-the-loop onayı — yapıldı (30.10.2026, yukarıda "Kullanıcı onayı")
 5. Streamable HTTP gateway modu — yapıldı (30.10.2026, yukarıda "Uzak sunucular: HTTP gateway")
-6. SIEM çıktısı (syslog / OTLP)
+6. SIEM çıktısı (syslog / OTLP) — yapıldı (31.10.2026, yukarıda "SIEM'e gönderme")
 7. "Görev talimatı" metinlerinde kalan yanlış alarm (Türkçe benchmark: soup05'te %71, soup05-ab2'de %33; iç testte
    İngilizce görev talimatları soup04-ab4'te %53), dış Türkçe setlerdeki
    düşük isabet (%48–65) ve rol istemlerindeki yanlış alarm (`prompts/get`'te model artık yalnızca uyarıyor; değişen

@@ -9,6 +9,9 @@ audit:
   enabled: true
   file: ./mcp-firewall-audit.jsonl
   logAllowed: true            # izin verilen tool çağrılarını da logla
+  # siem:                     # kayıtların bir kopyasını SIEM'e gönder (README: "SIEM'e gönderme")
+  #   syslog: { target: "tls://siem.sirket.example:6514" }
+  #   otlp: { endpoint: "https://otel.sirket.example/v1/logs", headers: { Authorization: "Bearer ${OTEL_TOKEN}" } }
 
 tools:
   default: allow              # hiçbir kurala uymayan tool: allow | deny | ask

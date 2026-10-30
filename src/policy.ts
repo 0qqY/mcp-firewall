@@ -5,6 +5,7 @@ import { parse } from 'yaml';
 import { buildDetectors, type Detector } from './dlp.js';
 import { globToRegExp } from './glob.js';
 import { compilePathPattern, type PathConstraint } from './paths.js';
+import { SYSLOG_FACILITIES, type SiemConfig } from './siem.js';
 import type { TaintConfig, TaintSink, TaintSource } from './taint.js';
 
 export type Mode = 'enforce' | 'monitor';
@@ -29,7 +30,8 @@ export interface ToolRule {
 
 export interface Policy {
   mode: Mode;
-  audit: { enabled: boolean; file: string; logAllowed: boolean };
+  /** `siem`: copies of the records sent to syslog or an OpenTelemetry collector, independent of `enabled`. */
+  audit: { enabled: boolean; file: string; logAllowed: boolean; siem?: SiemConfig };
   tools: { default: Action; rules: ToolRule[] };
   methods: { deny: RegExp[] };
   descriptionScan: { enabled: boolean; action: 'hide' | 'warn'; patterns: RegExp[]; hiddenUnicode: boolean };
@@ -175,6 +177,69 @@ function compilePaths(raw: unknown, baseDir: string, path: string): PathConstrai
   };
 }
 
+/** `${VAR}` in a value names an environment variable, so tokens stay out of the policy file. */
+function expandEnv(v: string, path: string): string {
+  return v.replace(/\$\{(\w+)\}/g, (_, name: string) => {
+    const value = process.env[name];
+    if (value === undefined) throw new PolicyError(`${path}: environment variable ${name} is not set`);
+    return value;
+  });
+}
+
+function url(v: unknown, protocols: string[], path: string): URL {
+  if (typeof v !== 'string') throw new PolicyError(`${path}: expected a URL`);
+  let u: URL;
+  try {
+    u = new URL(v);
+  } catch {
+    throw new PolicyError(`${path}: not a URL: ${v}`);
+  }
+  if (!protocols.includes(u.protocol)) throw new PolicyError(`${path}: expected a ${protocols.map((p) => p.slice(0, -1)).join(', ')} URL`);
+  if (!u.hostname) throw new PolicyError(`${path}: the URL needs a host`);
+  return u;
+}
+
+function compileSiem(raw: unknown, baseDir: string): SiemConfig | undefined {
+  if (raw === undefined) return undefined;
+  const s = obj(raw, 'audit.siem');
+  const syslog = s.syslog === undefined ? undefined : obj(s.syslog, 'audit.siem.syslog');
+  const otlp = s.otlp === undefined ? undefined : obj(s.otlp, 'audit.siem.otlp');
+  if (!syslog && !otlp) throw new PolicyError('audit.siem: configure syslog, otlp or both');
+  let syslogConfig: SiemConfig['syslog'];
+  if (syslog) {
+    const target = url(syslog.target, ['udp:', 'tcp:', 'tls:'], 'audit.siem.syslog.target');
+    const facility = oneOf(syslog.facility, Object.keys(SYSLOG_FACILITIES), 'local0', 'audit.siem.syslog.facility');
+    if (syslog.appName !== undefined && typeof syslog.appName !== 'string') throw new PolicyError('audit.siem.syslog.appName: expected a string');
+    if (syslog.ca !== undefined && target.protocol !== 'tls:') throw new PolicyError('audit.siem.syslog.ca: only for tls:// targets');
+    const framing = oneOf(syslog.framing, ['octet-counting', 'newline'] as const, 'octet-counting', 'audit.siem.syslog.framing');
+    if (syslog.framing !== undefined && target.protocol === 'udp:') throw new PolicyError('audit.siem.syslog.framing: only for tcp:// and tls:// targets');
+    syslogConfig = {
+      target,
+      facility: SYSLOG_FACILITIES[facility],
+      appName: typeof syslog.appName === 'string' ? syslog.appName : 'mcp-firewall',
+      ca: syslog.ca === undefined ? undefined : filePath(syslog.ca, '', baseDir, 'audit.siem.syslog.ca'),
+      framing,
+    };
+  }
+  let otlpConfig: SiemConfig['otlp'];
+  if (otlp) {
+    const endpoint = url(otlp.endpoint, ['http:', 'https:'], 'audit.siem.otlp.endpoint');
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(obj(otlp.headers, 'audit.siem.otlp.headers'))) {
+      if (typeof v !== 'string') throw new PolicyError(`audit.siem.otlp.headers.${k}: expected a string`);
+      headers[k] = expandEnv(v, `audit.siem.otlp.headers.${k}`);
+    }
+    otlpConfig = { endpoint, headers };
+  }
+  return {
+    syslog: syslogConfig,
+    otlp: otlpConfig,
+    logAllowed: bool(s.logAllowed, false, 'audit.siem.logAllowed'),
+    excerpt: bool(s.excerpt, false, 'audit.siem.excerpt'),
+    queueLimit: num(s.queueLimit, 1000, 1, 1_000_000, 'audit.siem.queueLimit'),
+  };
+}
+
 function compileRule(raw: unknown, path: string, baseDir: string): ToolRule {
   const r = obj(raw, path);
   if (typeof r.match !== 'string') throw new PolicyError(`${path}.match: expected a tool name or glob`);
@@ -286,6 +351,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
       enabled: bool(audit.enabled, true, 'audit.enabled'),
       file: filePath(audit.file, 'mcp-firewall-audit.jsonl', baseDir, 'audit.file'),
       logAllowed: bool(audit.logAllowed, true, 'audit.logAllowed'),
+      siem: compileSiem(audit.siem, baseDir),
     },
     tools: {
       default: oneOf(tools.default, ['allow', 'deny', 'ask'] as const, 'allow', 'tools.default'),
