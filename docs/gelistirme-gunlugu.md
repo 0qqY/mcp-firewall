@@ -287,3 +287,13 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     Pencere metninde argümanlardan görünmez karakterler ve ANSI kodları siliniyor. Testte bulunan: cevapsız
     pencerenin zamanlayıcısı süreci 120 sn açık tutuyordu, `unref()` edildi. `test/approval.test.ts` 13 test,
     toplam 120/120 (ML modeli testi hariç).
+67. **Streamable HTTP gateway (30.10.2026):** yeni `src/gateway.ts` ve `mcp-firewall gateway` komutu. Politika
+    motorunu yeniden yazmamak için her istemci oturumuna bellekte dört akışla bir `FirewallProxy` açılıyor; gateway
+    yalnızca HTTP'yi çeviriyor. İstek içeren POST'a SSE ile cevap veriliyor; cevaplar istek id'sine göre doğru
+    akışa yönlendiriliyor, sunucu istekleri ve firewall'un onay pencereleri en son açık POST akışına, yoksa GET
+    akışına gidiyor, o da yoksa bekletiliyor. Uzak sunucuya her mesaj ayrı POST; JSON ve SSE yanıtları okunuyor,
+    `Mcp-Session-Id` iki tarafta ayrı tutuluyor, GET ve DELETE iletiliyor. Ulaşılamayan sunucu ya da HTTP hatası
+    JSON-RPC hatasına çevriliyor. `--header` `${VAR}` açıyor; tanımsız değişken boş token yerine hata veriyor.
+    Statik başlık istemcinin `Authorization`'ını geçersiz kılıyor. ML yükleyicisi paylaşılıyor (oturum başına
+    model yüklenmiyor); CLI'deki yükleme kodu stdio ile ortak `classifierLoader`'a taşındı. `test/gateway.test.ts`
+    7 test (sahte uzak sunucuyla), toplam 127/127 (ML modeli testi hariç). Gerçek CLI ile uçtan uca denendi.

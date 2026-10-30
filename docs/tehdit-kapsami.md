@@ -71,7 +71,7 @@ gizleme geri alma adımlarından sonraki metin). 27.10.2026'dan önceki varsayı
 | Sunucu tarafı açıklar | Anthropic Filesystem MCP "EscapeRoute" CVE-2025-53109/53110 (sembolik bağlantı ve önek atlatma); MCP sunucularında komut enjeksiyonu (OWASP MCP05) | Açık sunucu kodunun içinde çalışıyor. Argüman regex kuralları (`..`, `/etc`, `;`) bir kısmını kesebilir ama varsayılan olarak tanımlı değiller. |
 | İstemci ve aracı yazılım açıkları | mcp-remote CVE-2025-6514 (OAuth `authorization_endpoint` üzerinden komut çalıştırma); MCP Inspector CVE-2025-49596 ve CVE-2025-58444 | OAuth akışı JSON-RPC başlamadan önce, `mcp-remote` sürecinin içinde gerçekleşiyor. |
 | Yapılandırma dosyası saldırıları | Cursor MCPoison CVE-2025-54136; CurXecute CVE-2025-54135; IDE'lerin proje tanımlı MCP sunucularını otomatik çalıştırması (CSA, Temmuz 2026) | Firewall da aynı `mcp.json` içinde tanımlı; saldırgan bu dosyayı değiştirirse firewall'u devreden çıkarabilir veya firewall'suz yeni bir sunucu ekleyebilir. |
-| Uzak HTTP/SSE sunucuları, OAuth ve token sorunları | Token passthrough, confused deputy, kapsam genişlemesi (OWASP MCP01/02/07) | Proxy yalnızca stdio destekliyor. `mcp-remote` ile sarmalanabilir ama kimlik doğrulama katmanı korunmuyor. |
+| Uzak HTTP/SSE sunucuları, OAuth ve token sorunları | Token passthrough, confused deputy, kapsam genişlemesi (OWASP MCP01/02/07) | 30.10.2026'dan itibaren `mcp-firewall gateway` uzak Streamable HTTP sunucularının mesajlarını da denetliyor. Kimlik doğrulama katmanı ise kapsam dışı: OAuth akışı gateway üzerinden yürümüyor, token `--header` ile veriliyor ve gateway token'ın kapsamını denetlemiyor. |
 | Metinsiz kötüye kullanım | Model, injection içermeyen meşru verilerle kendi kendine yanlış bir aksiyon seçiyor; kullanıcı "her zaman izin ver" demiş | Tespit edilecek bir saldırı metni yok; niyeti ancak politika belirleyebilir. |
 
 ### Not: postmark-mcp bir rug pull'du, ama bizim pin mekanizmamızın gördüğü türden değil
@@ -195,6 +195,10 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
     elicitation penceresiyle soruyor. Pencerede argümanlar görünmez karakterlerden temizlenmiş olarak gösteriliyor.
     Reddedilen, 120 sn içinde cevaplanmayan ya da sorulamayan (istemci desteklemiyor) çağrı engelleniyor. Kalan
     sınır: onay yorgunluğu ve elicitation desteklemeyen istemciler. 120/120 test (ML modeli testi hariç).
+25. Streamable HTTP gateway (30.10.2026): `mcp-firewall gateway --upstream <url>` uzak MCP sunucularının önüne
+    yerel bir HTTP uç noktası koyuyor; her istemci oturumu kendi firewall örneğiyle bütün kontrollerden geçiyor.
+    `Origin` denetimi (DNS rebinding), yalnızca localhost'ta dinleme ve ortam değişkeninden okunan başlıklar var.
+    Kalan sınırlar: OAuth keşfi, akış sürdürme ve uzak sunucuda kod sabitleme. 127/127 test (ML modeli testi hariç).
 
 **Sıradakiler:**
 

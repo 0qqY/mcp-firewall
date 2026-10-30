@@ -7,12 +7,15 @@ import { startDashboard } from './dashboard/server.js';
 import type { Classifier } from './ml/classifier.js';
 import { loadTransformersClassifier } from './ml/transformers.js';
 import { fingerprintServer } from './codepin.js';
+import { Gateway } from './gateway.js';
 import { approvePending, listPending, PinStore } from './pinning.js';
 import { loadPolicy, PolicyError, type Policy } from './policy.js';
 import { FirewallProxy } from './proxy.js';
 import { TaintTracker } from './taint.js';
 
 const USAGE = `Usage: mcp-firewall [--policy <file>] [--name <server-id>] [--code <path>]... -- <command> [args...]
+       mcp-firewall gateway --upstream <url> [--policy <file>] [--name <server-id>] [--listen <host:port>]
+                            [--path </mcp>] [--header "Name: value"]... [--allow-origin <origin>]... [--no-forward-auth]
        mcp-firewall dashboard [--policy <file>] [--audit <file>] [--port <port>]
        mcp-firewall pins list [--policy <file>]
        mcp-firewall pins approve --name <server-id> [--policy <file>] [<tool>...]
@@ -25,6 +28,11 @@ Options:
                     (npx packages, local scripts); repeatable
   --audit <file>    Audit log to show (default: the policy's audit.file)
   --port <port>     Dashboard port on 127.0.0.1 (default: 4747)
+
+gateway serves a Streamable HTTP MCP endpoint (default http://127.0.0.1:8787/mcp) in front of a remote
+server, with the same policy checks. --header values may name environment variables as \${VAR}, so
+credentials stay out of client configs. The client's own Authorization header is passed upstream
+unless a --header sets one or --no-forward-auth is given.
 
 pins approve trusts what the firewall saw but held back: changed or held tool definitions and
 prompt templates ('@prompt:<name>#<args>'), and changed server code ('@server-code'). Without
@@ -113,6 +121,101 @@ function runDashboard(argv: string[]): void {
   });
 }
 
+/** The ML loader; memoised, so a gateway with many sessions loads the model once. A model that cannot load stops the firewall. */
+function classifierLoader(policy: Policy, audit: AuditLog, onFail: () => void): (() => Promise<Classifier>) | undefined {
+  if (!policy.ml.enabled) return undefined;
+  // A missing model must fail loudly, not degrade silently, and before any server starts.
+  if (!existsSync(policy.ml.model)) {
+    process.stderr.write(`mcp-firewall: cannot load ML model ${policy.ml.model}: not found\n`);
+    process.exit(1);
+  }
+  let loading: Promise<Classifier> | undefined;
+  return () => {
+    if (loading) return loading;
+    const started = Date.now();
+    loading = loadTransformersClassifier(policy.ml.model, policy.ml);
+    loading.then(
+      (loaded) => audit.record({ verdict: 'info', reason: `ML classifier ${loaded.name} loaded in ${Date.now() - started} ms` }),
+      (err: Error) => {
+        process.stderr.write(`mcp-firewall: cannot load ML model ${policy.ml.model}: ${err.message}\n`);
+        onFail();
+        process.exit(1);
+      },
+    );
+    return loading;
+  };
+}
+
+/** `Name: value` with \${VAR} replaced from the environment; a missing variable is an error, not an empty credential. */
+function parseHeader(spec: string): [string, string] {
+  const colon = spec.indexOf(':');
+  if (colon <= 0) throw new UsageError(`--header expects "Name: value", got ${spec}`);
+  const value = spec.slice(colon + 1).trim().replace(/\$\{(\w+)\}/g, (_, name: string) => {
+    const v = process.env[name];
+    if (v === undefined) throw new UsageError(`--header: environment variable ${name} is not set`);
+    return v;
+  });
+  return [spec.slice(0, colon).trim(), value];
+}
+
+function runGateway(argv: string[]): void {
+  let policyFile = process.env.MCP_FIREWALL_POLICY || undefined;
+  let upstream: URL | undefined;
+  let name: string | undefined;
+  let listen = '127.0.0.1:8787';
+  let path = '/mcp';
+  let forwardAuthorization = true;
+  const headers: Record<string, string> = {};
+  const allowedOrigins: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i];
+    if (flag === '--no-forward-auth') {
+      forwardAuthorization = false;
+      continue;
+    }
+    const value = argv[++i];
+    if (value === undefined) throw new UsageError(`${flag} needs a value`);
+    if (flag === '--policy') policyFile = value;
+    else if (flag === '--name') name = value;
+    else if (flag === '--listen') listen = value;
+    else if (flag === '--path') path = value.startsWith('/') ? value : `/${value}`;
+    else if (flag === '--allow-origin') allowedOrigins.push(value);
+    else if (flag === '--header') {
+      const [k, v] = parseHeader(value);
+      headers[k] = v;
+    } else if (flag === '--upstream') {
+      try {
+        upstream = new URL(value);
+      } catch {
+        throw new UsageError(`--upstream: not a URL: ${value}`);
+      }
+      if (upstream.protocol !== 'https:' && upstream.protocol !== 'http:') throw new UsageError('--upstream must be an http(s) URL');
+    } else throw new UsageError(`unknown option ${flag}`);
+  }
+  if (!upstream) throw new UsageError('gateway needs --upstream <url>');
+  const match = /^(.*):(\d+)$/.exec(listen);
+  if (!match) throw new UsageError(`--listen expects host:port, got ${listen}`);
+  const [, host, port] = match;
+
+  const policy = loadPolicy(policyFile);
+  const serverId = name ?? upstream.origin + upstream.pathname;
+  const audit = new AuditLog(policy.audit.enabled ? policy.audit.file : undefined, policy.audit.logAllowed, serverId);
+  const pins = policy.pinning.enabled ? new PinStore(policy.pinning.file, serverId) : undefined;
+  const classifier = classifierLoader(policy, audit, () => gateway.close());
+  const gateway = new Gateway({ policy, audit, pins, upstream, headers, forwardAuthorization, path, allowedOrigins, serverId, classifier });
+  if (!/^(127\.\d+\.\d+\.\d+|localhost|::1|\[::1\])$/i.test(host)) {
+    process.stderr.write(`mcp-firewall: warning: listening on ${host}, reachable from other machines; the gateway has no authentication of its own\n`);
+  }
+  if (upstream.protocol === 'http:' && !/^(127\.|localhost$|\[::1\]$)/.test(upstream.hostname)) {
+    process.stderr.write('mcp-firewall: warning: upstream is plain http; credentials and data travel unencrypted\n');
+  }
+  gateway.server.listen(Number(port), host.replace(/^\[|\]$/g, ''), () => {
+    audit.record({ verdict: 'info', reason: `gateway started in ${policy.mode} mode: http://${listen}${path} -> ${upstream!.href}` });
+    process.stderr.write(`MCP Firewall gateway: http://${listen}${path} -> ${upstream!.href}\n`);
+  });
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => (gateway.close(), process.exit(0)));
+}
+
 async function main(): Promise<void> {
   // stdout carries JSON-RPC; keep stray library logging out of it.
   console.log = console.info = console.debug = console.error;
@@ -128,6 +231,16 @@ async function main(): Promise<void> {
     } catch (err) {
       process.stderr.write(`mcp-firewall: ${(err as Error).message}\n`);
       process.exit(2);
+    }
+    return;
+  }
+  if (argv[0] === 'gateway') {
+    try {
+      runGateway(argv.slice(1));
+    } catch (err) {
+      process.stderr.write(`mcp-firewall: ${(err as Error).message}\n`);
+      if (err instanceof UsageError) process.stderr.write(USAGE);
+      process.exit(err instanceof UsageError || err instanceof PolicyError ? 2 : 1);
     }
     return;
   }
@@ -157,11 +270,8 @@ async function main(): Promise<void> {
   const audit = new AuditLog(policy.audit.enabled ? policy.audit.file : undefined, policy.audit.logAllowed, serverId);
   const pins = policy.pinning.enabled ? new PinStore(policy.pinning.file, serverId) : undefined;
 
-  // A missing model must fail loudly, not degrade silently, and before the server starts.
-  if (policy.ml.enabled && !existsSync(policy.ml.model)) {
-    process.stderr.write(`mcp-firewall: cannot load ML model ${policy.ml.model}: not found\n`);
-    process.exit(1);
-  }
+  // The proxy calls this once the handshake has been answered.
+  const loadClassifier = classifierLoader(policy, audit, () => child.kill());
 
   // stdout belongs to the JSON-RPC stream; server stderr passes straight through for host logs.
   const child = spawn(options.command, options.args, { stdio: ['pipe', 'pipe', 'inherit'] });
@@ -177,24 +287,6 @@ async function main(): Promise<void> {
   });
   process.stdin.on('end', () => child.stdin!.end());
   for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => child.kill(sig));
-
-  // The proxy calls this once the handshake has been answered; a model that cannot load stops the firewall.
-  let loadClassifier: (() => Promise<Classifier>) | undefined;
-  if (policy.ml.enabled) {
-    loadClassifier = () => {
-      const started = Date.now();
-      const loading = loadTransformersClassifier(policy.ml.model, policy.ml);
-      loading.then(
-        (loaded) => audit.record({ verdict: 'info', reason: `ML classifier ${loaded.name} loaded in ${Date.now() - started} ms` }),
-        (err: Error) => {
-          process.stderr.write(`mcp-firewall: cannot load ML model ${policy.ml.model}: ${err.message}\n`);
-          child.kill();
-          process.exit(1);
-        },
-      );
-      return loading;
-    };
-  }
 
   audit.record({ verdict: 'info', reason: `firewall started in ${policy.mode} mode` });
   const proxy = new FirewallProxy(policy, audit, pins, {

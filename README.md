@@ -1,11 +1,12 @@
 # MCP Firewall
 
-MCP server'larının önüne geçen, politika uygulayan bir **stdio proxy**. Host (Claude Desktop, Cursor, IDE)
-ile gerçek MCP server arasındaki her JSON-RPC mesajını parse eder, YAML politikasına göre izin verir,
-engeller, maskeler ve loglar.
+MCP server'larının önüne geçen, politika uygulayan bir **stdio proxy** ve uzak sunucular için **HTTP gateway**.
+Host (Claude Desktop, Cursor, IDE) ile gerçek MCP server arasındaki her JSON-RPC mesajını parse eder, YAML
+politikasına göre izin verir, engeller, maskeler ve loglar.
 
 ```
 Host ──stdio──► mcp-firewall ──stdio──► Gerçek MCP server
+Host ──HTTP───► mcp-firewall gateway ──HTTPS──► Uzak MCP server
                      │
        policy.yaml · audit.jsonl · pins.json
 ```
@@ -81,6 +82,30 @@ JSONL olarak `audit.file` dosyasına gider. Politika referansı için [policy.ex
 
 **İpucu:** Yeni bir server'ı önce `mode: monitor` ile çalıştır, audit logunda `would_block` kayıtlarını
 inceleyip kuralları ayarla, sonra `enforce`'a geç.
+
+### Uzak sunucular: HTTP gateway
+Streamable HTTP ile konuşan uzak bir MCP sunucusunun önüne, aynı politika motoruyla yerel bir uç nokta koyar:
+
+```bash
+mcp-firewall gateway --upstream https://mcp.ornek.com/mcp --name ornek --policy policy.yaml --header "Authorization: Bearer ${ORNEK_TOKEN}"
+```
+
+İstemcide sunucu adresi olarak `http://127.0.0.1:8787/mcp` verilir (Claude Code: `claude mcp add --transport http
+ornek http://127.0.0.1:8787/mcp`).
+
+- Her istemci oturumu (`Mcp-Session-Id`) kendi firewall örneğini alır: tool kuralları, `paths`, DLP, ML, pinler,
+  taint ve `ask` onayları stdio'daki gibi çalışır. Model bir kez yüklenir, oturumlar paylaşır.
+- İstemcinin POST'ları uzak sunucuya tek tek iletilir; JSON ya da SSE yanıtlar firewall'dan geçip isteğin geldiği
+  akışa döner. Sunucunun kendi başlattığı mesajlar için GET akışı ve oturumu bitiren DELETE de iletilir. Uzak
+  sunucunun oturum kimliği istemciye gösterilmez.
+- `--header` değerlerindeki `${DEĞİŞKEN}` ortam değişkeninden okunur; token istemci yapılandırmasına yazılmaz. Böyle
+  bir başlık yoksa istemcinin kendi `Authorization` başlığı iletilir (`--no-forward-auth` kapatır).
+- Varsayılan dinleme adresi `127.0.0.1:8787` (`--listen`). Tarayıcıdan gelen ve `Origin`'i localhost olmayan
+  istekler reddedilir (DNS rebinding); izin verilecek kökenler `--allow-origin` ile eklenir. Gateway'in kendi kimlik
+  doğrulaması yoktur: başka bir adreste dinletilirse uyarı verir.
+- Sınırlar: OAuth keşfi (401 + `WWW-Authenticate` ile tarayıcıda giriş) gateway üzerinden yapılamaz; token'ı
+  `--header` ile verin. Kopan SSE akışını sürdürme (`Last-Event-ID`) desteklenmiyor. Sunucu kodu sabitleme uzak
+  sunucuda uygulanamaz (kod görünmüyor).
 
 ### Yol kısıtı (`paths`)
 Regex ile yol denetimi kolay atlatılır: `..\`, `%2e%2e/`, `file:///`, `C:\PROGRA~1`, `secret.env.` ya da izinli
@@ -222,6 +247,9 @@ sunucularda `warn` veya `off` kullanılmalı.
 |---|---|
 | `src/cli.ts` | Argümanlar, server sürecini başlatma, sinyal/çıkış yönetimi |
 | `src/proxy.ts` | Mesaj yönlendirme, istek/yanıt eşleştirme, karar uygulama |
+| `src/gateway.ts` | Streamable HTTP gateway: oturum başına bir proxy, POST/GET/DELETE ve SSE çevirisi |
+| `src/taint.ts` | Oturum boyunca veri akışı takibi (kaynak → çıkış tool'u) |
+| `src/paths.ts` | Yol argümanlarını kanonik biçime getirme ve kalıplarla karşılaştırma |
 | `src/engine.ts` | Saf karar fonksiyonları (tool, argüman, method, açıklama taraması) |
 | `src/policy.ts` | YAML yükleme, doğrulama, derleme |
 | `src/dlp.ts` | Secret/PII dedektörleri (Luhn ve TCKN checksum doğrulamalı) |
@@ -711,7 +739,7 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 2. Yol normalizasyonlu `paths` kısıtı — yapıldı (30.10.2026, yukarıda "Yol kısıtı")
 3. Oturum bazlı taint tracking — yapıldı (30.10.2026, yukarıda "Veri akışı takibi")
 4. Riskli çağrılar için human-in-the-loop onayı — yapıldı (30.10.2026, yukarıda "Kullanıcı onayı")
-5. Streamable HTTP gateway modu (aynı politika motoru)
+5. Streamable HTTP gateway modu — yapıldı (30.10.2026, yukarıda "Uzak sunucular: HTTP gateway")
 6. SIEM çıktısı (syslog / OTLP)
 7. "Görev talimatı" metinlerinde kalan yanlış alarm (Türkçe benchmark: soup05'te %71, soup05-ab2'de %33; iç testte
    İngilizce görev talimatları soup04-ab4'te %53), dış Türkçe setlerdeki
