@@ -98,6 +98,26 @@ dlp:
     - name: internal_hostname
       pattern: '\b[a-z0-9-]+\.corp\.internal\b'
 
+# Veri akışı takibi: kaynak tool'ların döndürdüğü metin, çıkış (sink) tool'larının argümanlarında görülürse
+# çağrı engellenir. Metnin kendisi değil yalnızca özetleri tutulur. sources/sinks boşsa hiçbir şey yapmaz.
+taint:
+  enabled: true
+  action: block               # block | warn
+  scope: shared               # shared: aynı istemcinin tüm firewall'ları etiketleri paylaşır | server: yalnızca bu sunucu
+                              # (arada npx/kabuk varsa her sunucuya aynı MCP_FIREWALL_SESSION değerini verin)
+  ttlMinutes: 60              # etiketler bu süre sonra düşer (0 = oturum boyunca)
+  dlpLabel: secret            # DLP'nin bulgu verdiği sonuçlar bu etiketi alır ('' = kapalı)
+  sources:
+    - match: "read_file"      # label varsayılan: private
+    - match: "get_file_contents"
+  sinks:
+    - match: "send_*"         # when: content (varsayılan): argümanda okunan metin varsa engelle
+    - match: "post_message"
+    - match: "create_issue"
+    # - match: "create_pull_request"
+    #   when: session         # etiket alındıktan sonra bu tool'a her çağrıyı engelle
+    #   labels: [private]     # yalnızca bu etiketler (boşsa hepsi)
+
 # Katman 2: ML prompt-injection sınıflandırıcısı (yerel ONNX, internete çıkmaz)
 ml:
   enabled: false

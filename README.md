@@ -29,6 +29,7 @@ Host ──stdio──► mcp-firewall ──stdio──► Gerçek MCP server
 | Hata mesajıyla zehirleme (ATPA) | JSON-RPC `error` yanıtları da DLP, gizli karakter ve ML taramasından geçer |
 | Görünmez talimatlar, ANSI ile gizleme | `hiddenText`: sonuç, hata ve sampling içeriğindeki görünmez karakterler ve terminal kaçış kodları temizlenir |
 | Veri sızdırma | `dlp.scanRequests`: argümanlardaki secret/PII maskeleme veya engelleme |
+| Formatsız veri sızdırma (toxic flow) | `taint`: kaynak tool'ların döndürdüğü metnin özetleri oturum boyunca tutulur; bu metni (düz, büyük-küçük harf değişmiş ya da base64'lenmiş) argümanında taşıyan çıkış tool'u engellenir. Aynı istemcinin sunucuları etiketleri paylaşır |
 | Secret/PII'nin modele sızması | `dlp.scanResponses`: tool/resource/prompt sonuçlarında maskeleme |
 | Server'ın LLM'ini kötüye kullanması | `methods.deny: [sampling/createMessage]`, ya da izin verilirse içerik taraması (`ml.scan.serverRequests`) ve `sampling` sınırları: dakika/oturum başına istek, istek başına `maxTokens` tavanı, oturum token bütçesi |
 | Kullanıcıya oltalama | `methods.deny: [elicitation/create]` veya içerik taraması (`ml.scan.serverRequests`) |
@@ -105,6 +106,41 @@ göreceği biçime getirir, sonra karşılaştırır:
   Windows ve macOS'ta büyük-küçük harf duyarsızdır.
 - Sınır: denetim çağrı anındadır. Denetimden sonra, sunucu dosyayı açmadan önce bağ değiştirilirse (TOCTOU) bunu
   yakalayamaz; sunucunun kendi kök kısıtıyla birlikte kullanın.
+
+### Veri akışı takibi (`taint`)
+DLP yalnızca formatı bilinen veriyi (anahtar, kart numarası) tanır. Bir sözleşme metni, sohbet geçmişi ya da
+özel repodaki kod ise sıradan metindir. `taint` bloğu bu metnin nereden gelip nereye gittiğini izler:
+
+```yaml
+taint:
+  sources:                        # sonuçları oturumu etiketleyen tool'lar
+    - match: "read_file"          # etiket varsayılan: private
+    - match: "list_chats"
+      label: chat
+  sinks:                          # veriyi dışarı taşıyabilen tool'lar
+    - match: "send_*"             # when: content (varsayılan)
+    - match: "create_pull_request"
+      when: session
+      labels: [private]
+```
+
+- `content`: çıkış tool'unun argümanları, daha önce okunan metinden 8 kelimelik bir dizi ya da anahtara benzeyen uzun
+  bir kelime (16+ karakter, harf ve rakam) içeriyorsa çağrı engellenir. Karşılaştırma büyük-küçük harf ve noktalamadan
+  bağımsızdır; base64, hex ve %XX ile kodlanmış argümanlar çözülüp ayrıca denetlenir. Metnin kendisi değil yalnızca
+  SHA-256 özetleri tutulur.
+- `session`: etiket bir kez alındıktan sonra o tool'a yapılan her çağrı engellenir ("lethal trifecta" kuralı:
+  özel veriyi okuyan oturum dışarı yazamaz). Kesin ama katıdır; yalnızca gerçekten dışarı açılan tool'lara verin.
+- DLP'nin bir şey bulduğu her sonuç `secret` etiketini de alır (`dlpLabel`, boş bırakılırsa kapanır). Etiket,
+  modelin gördüğü (maskelenmiş) metne göre verilir: maskelenmiş bir anahtar sızdırılamayacağı için engellenmez.
+- Her sunucunun ayrı bir firewall süreci vardır. `scope: shared` (varsayılan) ile aynı istemcinin firewall'ları
+  etiketleri `mcp-firewall-taint/<oturum>.jsonl` dosyası üzerinden paylaşır: dosya sisteminden okunan metin Slack'e
+  gönderilirken de yakalanır. Oturum, firewall'u başlatan sürecin kimliğidir (istemci). Arada `npx` ya da bir kabuk
+  varsa her sunucuya `MCP_FIREWALL_SESSION` ortam değişkeniyle aynı değeri verin. `scope: server` etiketleri tek
+  sunucuda tutar.
+- Etiketler `ttlMinutes` (varsayılan 60) sonra düşer. `action: warn` yalnızca loglar; `mode: monitor` da engellemez.
+- Sınır: model metni kendi sözleriyle yeniden yazar, özetler ya da başka bir dile çevirirse `content` modu bunu
+  yakalayamaz; bu durumlar için `session` modu var. Yalnızca `tools/call` sonuçları kaynak olabilir (resource
+  okumaları henüz değil).
 
 ### Pinler ve onay
 Firewall ilk görüşte üç şeyi sabitler (pinler): tool tanımlarını, sunucu kodunu ve prompt şablonlarını. `onNew: hide`
@@ -633,13 +669,15 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 - Regex tabanlı argüman denetimi encoding/normalizasyon hilelerine açıktır (ör. `%2e%2e/`, Windows kısa yolları).
   Yol argümanları için `paths` kullanın; `paths` de denetimden sonra değiştirilen bağları (TOCTOU) yakalayamaz.
 - Description taraması kalıp tabanlıdır; yeni ifade biçimlerini kaçırabilir.
+- `taint` içerik modu kelimesi kelimesine taşınan metni yakalar; özetlenmiş, yeniden yazılmış ya da çevrilmiş veriyi
+  yakalamaz (bunun için `when: session`).
 - JSON-RPC batch'leri tek tek mesajlar olarak iletilir.
 - ML sınıflandırıcısı da bir modeldir: adversarial girdilerle atlatılabilir, bu yüzden tek savunma hattı değildir.
 
 ## Yol haritası
 1. Etiketli audit verisiyle model eğitimi ve red team döngüsü
 2. Yol normalizasyonlu `paths` kısıtı — yapıldı (30.10.2026, yukarıda "Yol kısıtı")
-3. Oturum bazlı taint tracking (hassas veri okunduktan sonra dışarı yazan tool'ları engelle)
+3. Oturum bazlı taint tracking — yapıldı (30.10.2026, yukarıda "Veri akışı takibi")
 4. Riskli çağrılar için human-in-the-loop onayı
 5. Streamable HTTP gateway modu (aynı politika motoru)
 6. SIEM çıktısı (syslog / OTLP)

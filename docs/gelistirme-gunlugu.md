@@ -267,3 +267,12 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     Artık UNC yollarına dosya sistemi çağrısı yapılmıyor. `\\.\pipe\`, `\\.\C:`, `\\?\GLOBALROOT` gibi aygıt yolları
     reddediliyor. `test/paths.test.ts` 9 test (Windows'a özgü 3'ü başka sistemde atlanıyor), toplam 97/97.
     `policy.example.yaml`'daki `read_file` kuralı regex yerine `paths` kullanıyor.
+65. **`taint` veri akışı takibi (30.10.2026):** DLP formatsız veriyi (sohbet geçmişi, özel repo içeriği) tanımıyordu.
+    Yeni `src/taint.ts`: `sources` tool'larının sonuçları oturumu etiketliyor (varsayılan `private`; DLP bulgusu
+    `secret`). Etiketle birlikte metnin 8 kelimelik dizilerinin ve 16+ karakterlik harf-rakam karışık kelimelerinin
+    SHA-256 özetleri tutuluyor; metnin kendisi saklanmıyor. `sinks` çağrısı DLP'den sonra, iletilmeden önce
+    denetleniyor: `content` argümanlarda (ve çözülmüş base64/hex/%XX biçimlerinde) eşleşen özet arıyor, `session`
+    etiket varken her çağrıyı reddediyor. Her sunucu ayrı süreç olduğundan `scope: shared` etiketleri
+    `mcp-firewall-taint/<ppid veya MCP_FIREWALL_SESSION>.jsonl` dosyasına ekleyip diğer firewall'ların eklediklerini
+    okuyor; süresi dolan dosyalar açılışta siliniyor. Etiketler modelin gördüğü (maskelenmiş) metne göre veriliyor.
+    `test/taint.test.ts` 11 test, toplam 107/107 (ML modeli testi hariç).

@@ -10,6 +10,7 @@ import { fingerprintServer } from './codepin.js';
 import { approvePending, listPending, PinStore } from './pinning.js';
 import { loadPolicy, PolicyError, type Policy } from './policy.js';
 import { FirewallProxy } from './proxy.js';
+import { TaintTracker } from './taint.js';
 
 const USAGE = `Usage: mcp-firewall [--policy <file>] [--name <server-id>] [--code <path>]... -- <command> [args...]
        mcp-firewall dashboard [--policy <file>] [--audit <file>] [--port <port>]
@@ -196,12 +197,15 @@ async function main(): Promise<void> {
   }
 
   audit.record({ verdict: 'info', reason: `firewall started in ${policy.mode} mode` });
-  new FirewallProxy(policy, audit, pins, {
+  const proxy = new FirewallProxy(policy, audit, pins, {
     clientIn: process.stdin,
     clientOut: process.stdout,
     serverIn: child.stdin!,
     serverOut: child.stdout!,
-  }, loadClassifier, () => fingerprintServer(options.command, options.args, options.code)).start();
+  }, loadClassifier, () => fingerprintServer(options.command, options.args, options.code));
+  // Each server has its own firewall process; a shared tracker lets data read through one stop at another's sink.
+  if (proxy.taint && policy.taint.scope === 'shared') proxy.taint = new TaintTracker(policy.taint, serverId, TaintTracker.sessionKey());
+  proxy.start();
 }
 
 void main();

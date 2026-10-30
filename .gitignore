@@ -3,6 +3,7 @@ dist/
 *.jsonl
 mcp-firewall-pins.json
 mcp-firewall-pins.pending.json
+mcp-firewall-taint/
 models/
 training/.venv/
 training/data/

@@ -29,6 +29,7 @@ import {
 import { extractMlText, extractText, scoreTexts, type Classifier } from './ml/classifier.js';
 import { hashPromptTemplate, promptPinKey, type PinStatus, type PinStore } from './pinning.js';
 import type { Policy } from './policy.js';
+import { TaintTracker } from './taint.js';
 
 /** Response types whose payload reaches the model and is therefore scanned. */
 const SCANNED_RESULTS = new Set(['tools/call', 'resources/read', 'prompts/get']);
@@ -111,6 +112,8 @@ export class FirewallProxy {
   private readonly samplingUse = { recent: [] as number[], requests: 0, tokens: 0 };
   /** Clock for the sampling rate window; tests replace it. */
   now: () => number = Date.now;
+  /** Session data-flow tracking; in this proxy only until the CLI swaps in one shared with the client's other servers. */
+  taint?: TaintTracker;
 
   constructor(
     private readonly policy: Policy,
@@ -124,7 +127,11 @@ export class FirewallProxy {
     private readonly classifier?: Classifier | (() => Promise<Classifier>),
     /** Fingerprints the server's code; called once, when the server answers the handshake (npx has installed it by then). */
     private readonly serverCode?: () => CodeFingerprint,
-  ) {}
+  ) {
+    const { taint } = policy;
+    // A server with sources only still labels the session for the sinks of the client's other servers.
+    if (taint.enabled && taint.sources.length + taint.sinks.length > 0) this.taint = new TaintTracker({ ...taint, scope: 'server' });
+  }
 
   start(): void {
     for (const [direction, input] of [['client->server', this.io.clientIn], ['server->client', this.io.serverOut]] as const) {
@@ -219,6 +226,13 @@ export class FirewallProxy {
         return undefined;
       }
       params.arguments = scan.value;
+    }
+
+    // Checked on the arguments as they will leave: a secret DLP has just redacted no longer flows anywhere.
+    const leak = this.checkTaint(name, params.arguments, ctx);
+    if (leak) {
+      send(this.io.clientOut, toolErrorResponse(msg.id, leak));
+      return undefined;
     }
 
     this.audit.record({ ...ctx, verdict: 'allow' });
@@ -342,6 +356,22 @@ export class FirewallProxy {
     return this.violation(ctx, reason) ? reason : undefined;
   }
 
+  /** Returns the refusal reason when a sink call would carry labelled session data out. */
+  private checkTaint(tool: string, args: unknown, ctx: Context): string | undefined {
+    const flow = this.taint?.checkSink(tool, args);
+    if (!flow) return undefined;
+    const origin = `'${flow.tool}'${flow.server === 'this server' ? '' : ` on ${flow.server}`}`;
+    const reason =
+      flow.when === 'content'
+        ? `data flow: arguments of '${tool}' carry ${flow.label} data returned by ${origin} earlier in this session`
+        : `data flow: '${tool}' may send data out and this session holds ${flow.label} data from ${origin}`;
+    if (this.taint!.config.action === 'warn') {
+      this.audit.record({ ...ctx, verdict: 'warn', reason });
+      return undefined;
+    }
+    return this.violation(ctx, reason) ? reason : undefined;
+  }
+
   private async inspectResult(msg: JsonRpcMessage, request: PendingRequest): Promise<JsonRpcMessage> {
     const ctx: Context = { direction: 'server->client', method: request.method, tool: request.tool };
     const refuse = (reason: string) =>
@@ -354,10 +384,12 @@ export class FirewallProxy {
       if (reason) return refuse(reason);
     }
 
+    let dlpFound = false;
     if (dlp.enabled && dlp.scanResponses) {
       const scan = this.applyDlp(msg.result, ctx, 'result');
       if (scan.blockReason) return refuse(scan.blockReason);
       msg.result = scan.value;
+      dlpFound = scan.found === true;
     }
 
     const hidden = this.applyHiddenText(msg.result, ctx, 'result');
@@ -379,6 +411,12 @@ export class FirewallProxy {
     if (this.classifier && action !== 'off') {
       const reason = await this.mlVerdict(extractMlText(msg.result), ctx, action);
       if (reason) return refuse(reason);
+    }
+
+    // Labelled on what the model will actually read, after redaction.
+    if (this.taint && request.method === 'tools/call') {
+      const labels = this.taint.markResult(request.tool ?? '', msg.result, dlpFound);
+      if (labels.length > 0) this.audit.record({ ...ctx, verdict: 'info', reason: `session labelled ${labels.join(', ')} by this result` });
     }
     return msg;
   }
@@ -482,25 +520,25 @@ export class FirewallProxy {
     return this.violation(event, flag.reason) ? flag.reason : undefined;
   }
 
-  private applyDlp(value: unknown, ctx: Context, what: string): { value: unknown; blockReason?: string } {
+  private applyDlp(value: unknown, ctx: Context, what: string): { value: unknown; blockReason?: string; found?: boolean } {
     const { detectors, action } = this.policy.dlp;
     const scan = deepScan(value, detectors);
     if (scan.findings.length === 0) return this.encodedDlp(value, ctx, what);
     const reason = `sensitive data in ${what}: ${formatFindings(scan.findings)}`;
-    if (action === 'block') return { value, blockReason: this.violation(ctx, reason) ? reason : undefined };
+    if (action === 'block') return { value, blockReason: this.violation(ctx, reason) ? reason : undefined, found: true };
     if (action === 'warn') {
       this.audit.record({ ...ctx, verdict: 'warn', reason });
-      return { value };
+      return { value, found: true };
     }
     this.audit.record({ ...ctx, verdict: this.enforcing ? 'redact' : 'would_redact', reason });
-    return { value: this.enforcing ? scan.value : value };
+    return { value: this.enforcing ? scan.value : value, found: true };
   }
 
   /**
    * Secrets hidden by encoding (a base64'd AWS key in a URL is a classic exfiltration channel). The
    * encoded form cannot be redacted in place, so `redact` escalates to blocking here.
    */
-  private encodedDlp(value: unknown, ctx: Context, what: string): { value: unknown; blockReason?: string } {
+  private encodedDlp(value: unknown, ctx: Context, what: string): { value: unknown; blockReason?: string; found?: boolean } {
     if (!this.policy.decoding.enabled) return { value };
     const decoded = decodeEmbedded(extractText(value));
     if (decoded.length === 0) return { value };
@@ -509,9 +547,9 @@ export class FirewallProxy {
     const reason = `encoded sensitive data in ${what}: ${formatFindings(findings)}`;
     if (this.policy.dlp.action === 'warn') {
       this.audit.record({ ...ctx, verdict: 'warn', reason });
-      return { value };
+      return { value, found: true };
     }
-    return { value, blockReason: this.violation(ctx, reason) ? reason : undefined };
+    return { value, blockReason: this.violation(ctx, reason) ? reason : undefined, found: true };
   }
 
   /** Invisible characters and terminal escapes hide text from the user that the model still reads. */

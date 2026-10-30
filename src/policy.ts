@@ -5,6 +5,7 @@ import { parse } from 'yaml';
 import { buildDetectors, type Detector } from './dlp.js';
 import { globToRegExp } from './glob.js';
 import { compilePathPattern, type PathConstraint } from './paths.js';
+import type { TaintConfig, TaintSink, TaintSource } from './taint.js';
 
 export type Mode = 'enforce' | 'monitor';
 export type Action = 'allow' | 'deny';
@@ -52,6 +53,8 @@ export interface Policy {
     /** What to do when a `prompts/get` template changed since it was pinned (argument values do not count). */
     prompts: 'block' | 'warn' | 'off';
   };
+  /** Session data-flow tracking: what source tools returned must not leave through sink tools. */
+  taint: TaintConfig;
   dlp: {
     enabled: boolean;
     scanRequests: boolean;
@@ -185,6 +188,45 @@ function compileRule(raw: unknown, path: string, baseDir: string): ToolRule {
   };
 }
 
+function compileTaint(raw: Obj, baseDir: string): TaintConfig {
+  const list = (key: 'sources' | 'sinks'): Obj[] => {
+    const v = raw[key] ?? [];
+    if (!Array.isArray(v)) throw new PolicyError(`taint.${key}: expected a list`);
+    return v.map((e, i) => {
+      const o = obj(e, `taint.${key}[${i}]`);
+      if (typeof o.match !== 'string') throw new PolicyError(`taint.${key}[${i}].match: expected a tool name or glob`);
+      return o;
+    });
+  };
+  const label = (v: unknown, def: string, path: string): string => {
+    if (v === undefined) return def;
+    if (typeof v !== 'string') throw new PolicyError(`${path}: expected a label`);
+    return v;
+  };
+  const sources: TaintSource[] = list('sources').map((o, i) => ({
+    pattern: o.match as string,
+    match: globToRegExp(o.match as string),
+    label: label(o.label, 'private', `taint.sources[${i}].label`) || 'private',
+  }));
+  const sinks: TaintSink[] = list('sinks').map((o, i) => ({
+    pattern: o.match as string,
+    match: globToRegExp(o.match as string),
+    labels: strList(o.labels, `taint.sinks[${i}].labels`) ?? [],
+    when: oneOf(o.when, ['content', 'session'] as const, 'content', `taint.sinks[${i}].when`),
+  }));
+  return {
+    enabled: bool(raw.enabled, true, 'taint.enabled'),
+    action: oneOf(raw.action, ['block', 'warn'] as const, 'block', 'taint.action'),
+    scope: oneOf(raw.scope, ['server', 'shared'] as const, 'shared', 'taint.scope'),
+    ttlMinutes: num(raw.ttlMinutes, 60, 0, 10_080, 'taint.ttlMinutes'),
+    dir: filePath(raw.dir, 'mcp-firewall-taint', baseDir, 'taint.dir'),
+    dlpLabel: label(raw.dlpLabel, 'secret', 'taint.dlpLabel'),
+    minMatches: num(raw.minMatches, 1, 1, 1_000, 'taint.minMatches'),
+    sources,
+    sinks,
+  };
+}
+
 /** Validates a parsed policy document; relative file paths resolve against `baseDir`. */
 export function compilePolicy(raw: unknown, baseDir: string): Policy {
   const root = obj(raw, 'policy');
@@ -199,6 +241,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
   const sampling = obj(root.sampling, 'sampling');
   const pinning = obj(root.pinning, 'pinning');
   const dlp = obj(root.dlp, 'dlp');
+  const taint = obj(root.taint, 'taint');
   const ml = obj(root.ml, 'ml');
   const mlScan = obj(ml.scan, 'ml.scan');
   if (ml.injectionLabel !== undefined && typeof ml.injectionLabel !== 'string') throw new PolicyError('ml.injectionLabel: expected a string');
@@ -268,6 +311,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
       serverCode: oneOf(pinning.serverCode, ['block', 'warn', 'off'] as const, 'block', 'pinning.serverCode'),
       prompts: oneOf(pinning.prompts, ['block', 'warn', 'off'] as const, 'block', 'pinning.prompts'),
     },
+    taint: compileTaint(taint, baseDir),
     dlp: {
       enabled: bool(dlp.enabled, true, 'dlp.enabled'),
       scanRequests: bool(dlp.scanRequests, true, 'dlp.scanRequests'),
