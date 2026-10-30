@@ -21,7 +21,8 @@ export interface TaintSink {
 
 export interface TaintConfig {
   enabled: boolean;
-  action: 'block' | 'warn';
+  /** ask: the user approves or refuses the call (see `approval`). */
+  action: 'block' | 'warn' | 'ask';
   /** server: labels stay in this proxy | shared: every proxy of the same client session sees them. */
   scope: 'server' | 'shared';
   ttlMinutes: number;

@@ -60,6 +60,11 @@ export interface ProxyStreams {
 type Direction = 'client->server' | 'server->client';
 type Context = Omit<AuditEvent, 'verdict' | 'reason'>;
 
+/** Prefix of the ids of the firewall's own elicitation requests, so the client's answers are not forwarded. */
+const APPROVAL_ID = 'mcp-firewall-approval-';
+/** Characters of the arguments shown in an approval prompt. */
+const APPROVAL_PREVIEW = 600;
+
 /** A client request awaiting its response; `args` are the non-empty `prompts/get` arguments. */
 interface PendingRequest {
   method: string;
@@ -94,6 +99,16 @@ interface Screening {
 /** What the model reads from a definition for the classifier: its text plus its parameter names. */
 const definitionMlText = (def: unknown): string => [extractText(def), parameterNamesText(def)].join('\n');
 
+/**
+ * The approval prompt. Arguments are model-written, so hidden characters and terminal escapes are removed
+ * before the user reads them (they could hide what the call really sends).
+ */
+function approvalMessage(tool: string, args: unknown, why: string): string {
+  const shown = JSON.stringify(stripHiddenChars(args ?? {}).value) ?? '{}';
+  const preview = shown.length > APPROVAL_PREVIEW ? `${shown.slice(0, APPROVAL_PREVIEW)}… (${shown.length} characters)` : shown;
+  return `MCP Firewall: allow the call to '${tool}'?\nWhy it needs approval: ${why}\nArguments: ${preview}`;
+}
+
 export class FirewallProxy {
   /** Requests the client sent, so server responses can be matched to the method that produced them. */
   private readonly pending = new Map<string, PendingRequest>();
@@ -114,6 +129,13 @@ export class FirewallProxy {
   now: () => number = Date.now;
   /** Session data-flow tracking; in this proxy only until the CLI swaps in one shared with the client's other servers. */
   taint?: TaintTracker;
+  /** Whether the client declared elicitation support, so the firewall can ask the user. */
+  private clientCanAsk = false;
+  /** The firewall's open approval requests, keyed by id, resolved by the client's answer (or undefined on timeout). */
+  private readonly approvals = new Map<string, (reply: JsonRpcMessage | undefined) => void>();
+  private approvalSeq = 0;
+  /** Tools the user allowed for the rest of the session. */
+  private readonly approvedTools = new Set<string>();
 
   constructor(
     private readonly policy: Policy,
@@ -185,6 +207,13 @@ export class FirewallProxy {
 
   private fromClient(msg: JsonRpcMessage): void {
     const direction = 'client->server';
+    // The user's answer to the firewall's own approval prompt (or a late one, after it timed out): the
+    // server never asked anything, so it is not forwarded.
+    if (isResponse(msg) && typeof msg.id === 'string' && msg.id.startsWith(APPROVAL_ID)) {
+      this.approvals.get(idKey(msg.id))?.(msg);
+      return;
+    }
+    if (isRequest(msg)) this.noteClientCapabilities(msg);
     if (typeof msg.method === 'string') {
       const decision = evaluateMethod(this.policy, msg.method);
       if (!decision.allowed && this.violation({ direction, method: msg.method }, decision.reason!)) {
@@ -194,8 +223,14 @@ export class FirewallProxy {
       if (isRequest(msg)) {
         const request: PendingRequest = { method: msg.method };
         if (msg.method === 'tools/call') {
-          request.tool = this.inspectToolCall(msg);
-          if (request.tool === undefined) return;
+          const inspected = this.inspectToolCall(msg);
+          if (!inspected) return;
+          request.tool = inspected.tool;
+          if (inspected.ask.length > 0) {
+            // Other messages keep flowing while the user decides; this call goes out only on approval.
+            void this.forwardIfApproved(msg, request, inspected.ask);
+            return;
+          }
         } else if (msg.method === 'prompts/get' && isObject(msg.params) && typeof msg.params.name === 'string') {
           request.tool = msg.params.name;
           request.args = promptArguments(msg.params.arguments);
@@ -206,8 +241,19 @@ export class FirewallProxy {
     send(this.io.serverIn, msg);
   }
 
-  /** Returns the tool name when the call may proceed, undefined when it was blocked and answered. */
-  private inspectToolCall(msg: JsonRpcMessage): string | undefined {
+  /** Elicitation support, from `initialize` or, from protocol 2026-07-28 on, any request's `_meta`. */
+  private noteClientCapabilities(msg: JsonRpcMessage): void {
+    const params = isObject(msg.params) ? msg.params : {};
+    const meta = isObject(params._meta) ? params._meta['io.modelcontextprotocol/clientCapabilities'] : undefined;
+    const caps = msg.method === 'initialize' ? params.capabilities : meta;
+    if (isObject(caps)) this.clientCanAsk = isObject(caps.elicitation);
+  }
+
+  /**
+   * Returns the tool name, plus why the user must approve the call first, when it may proceed;
+   * undefined when it was blocked and answered.
+   */
+  private inspectToolCall(msg: JsonRpcMessage): { tool: string; ask: string[] } | undefined {
     const params = isObject(msg.params) ? msg.params : {};
     const name = typeof params.name === 'string' ? params.name : '';
     const ctx: Context = { direction: 'client->server', method: 'tools/call', tool: name };
@@ -228,15 +274,105 @@ export class FirewallProxy {
       params.arguments = scan.value;
     }
 
+    const ask = decision.ask ? [decision.ask] : [];
     // Checked on the arguments as they will leave: a secret DLP has just redacted no longer flows anywhere.
-    const leak = this.checkTaint(name, params.arguments, ctx);
-    if (leak) {
-      send(this.io.clientOut, toolErrorResponse(msg.id, leak));
-      return undefined;
+    const flow = this.taintFlow(name, params.arguments);
+    if (flow) {
+      const { action } = this.taint!.config;
+      if (action === 'warn') this.audit.record({ ...ctx, verdict: 'warn', reason: flow });
+      else if (action === 'ask') ask.push(flow);
+      else if (this.violation(ctx, flow)) {
+        send(this.io.clientOut, toolErrorResponse(msg.id, flow));
+        return undefined;
+      }
     }
 
-    this.audit.record({ ...ctx, verdict: 'allow' });
-    return name;
+    if (ask.length === 0) this.audit.record({ ...ctx, verdict: 'allow' });
+    return { tool: name, ask };
+  }
+
+  /** Holds a tools/call until the user answers; forwards it on approval, refuses it otherwise. */
+  private async forwardIfApproved(msg: JsonRpcMessage, request: PendingRequest, reasons: string[]): Promise<void> {
+    const ctx: Context = { direction: 'client->server', method: 'tools/call', tool: request.tool };
+    const refusal = await this.approve(request.tool ?? '', (msg.params as JsonObject).arguments, reasons, ctx);
+    const reason = refusal ?? this.serverBlocked;
+    if (reason) {
+      send(this.io.clientOut, toolErrorResponse(msg.id, reason));
+      return;
+    }
+    this.pending.set(idKey(msg.id), request);
+    send(this.io.serverIn, msg);
+  }
+
+  /**
+   * Asks the user through an elicitation the client shows. Returns the refusal reason, or undefined
+   * when the call may go ahead.
+   */
+  private async approve(tool: string, args: unknown, reasons: string[], ctx: Context): Promise<string | undefined> {
+    const why = reasons.join('; ');
+    const { approval } = this.policy;
+    if (!this.enforcing) {
+      this.audit.record({ ...ctx, verdict: 'warn', reason: `approval required, forwarded in monitor mode: ${why}` });
+      return undefined;
+    }
+    if (this.approvedTools.has(tool)) {
+      this.audit.record({ ...ctx, verdict: 'info', reason: `allowed for this session by the user earlier: ${why}` });
+      return undefined;
+    }
+    const unavailable = (detail: string): string | undefined => {
+      if (approval.fallback === 'allow') {
+        this.audit.record({ ...ctx, verdict: 'warn', reason: `${detail}; allowed by approval.fallback: ${why}` });
+        return undefined;
+      }
+      const reason = `${detail}, so the call is refused: ${why}`;
+      this.violation(ctx, reason);
+      return reason;
+    };
+    if (!this.clientCanAsk) return unavailable('needs user approval but the client cannot ask (no elicitation support)');
+
+    const id = `${APPROVAL_ID}${++this.approvalSeq}`;
+    let timer: NodeJS.Timeout | undefined;
+    const answer = new Promise<JsonRpcMessage | undefined>((resolve) => {
+      this.approvals.set(idKey(id), resolve);
+      // The stdio streams keep the firewall alive; the timer alone must not.
+      timer = setTimeout(() => resolve(undefined), approval.timeoutSeconds * 1000).unref();
+    });
+    send(this.io.clientOut, {
+      jsonrpc: '2.0',
+      id,
+      method: 'elicitation/create',
+      params: {
+        message: approvalMessage(tool, args, why),
+        requestedSchema: {
+          type: 'object',
+          properties: approval.remember
+            ? { remember: { type: 'boolean', title: `Allow '${tool}' for the rest of this session`, default: false } }
+            : {},
+        },
+      },
+    });
+    this.audit.record({ ...ctx, verdict: 'info', reason: `waiting for user approval: ${why}` });
+    const reply = await answer;
+    clearTimeout(timer);
+    this.approvals.delete(idKey(id));
+
+    if (!reply) {
+      send(this.io.clientOut, { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id, reason: 'approval timed out' } });
+      const reason = `no answer to the approval prompt within ${approval.timeoutSeconds} s: ${why}`;
+      this.violation(ctx, reason);
+      return reason;
+    }
+    if (reply.error !== undefined) return unavailable('needs user approval but the client refused the prompt');
+    const result = isObject(reply.result) ? reply.result : {};
+    if (result.action !== 'accept') {
+      const reason = `the user did not approve the call (${String(result.action ?? 'no answer')}): ${why}`;
+      this.violation(ctx, reason);
+      return reason;
+    }
+    const remember = approval.remember && isObject(result.content) && result.content.remember === true;
+    if (remember) this.approvedTools.add(tool);
+    this.audit.record({ ...ctx, verdict: 'info', reason: `approved by the user${remember ? ' for this session' : ''}: ${why}` });
+    return undefined;
   }
 
   private async fromServer(msg: JsonRpcMessage): Promise<void> {
@@ -356,20 +492,14 @@ export class FirewallProxy {
     return this.violation(ctx, reason) ? reason : undefined;
   }
 
-  /** Returns the refusal reason when a sink call would carry labelled session data out. */
-  private checkTaint(tool: string, args: unknown, ctx: Context): string | undefined {
+  /** Describes the labelled session data a sink call would carry out, if any. */
+  private taintFlow(tool: string, args: unknown): string | undefined {
     const flow = this.taint?.checkSink(tool, args);
     if (!flow) return undefined;
     const origin = `'${flow.tool}'${flow.server === 'this server' ? '' : ` on ${flow.server}`}`;
-    const reason =
-      flow.when === 'content'
-        ? `data flow: arguments of '${tool}' carry ${flow.label} data returned by ${origin} earlier in this session`
-        : `data flow: '${tool}' may send data out and this session holds ${flow.label} data from ${origin}`;
-    if (this.taint!.config.action === 'warn') {
-      this.audit.record({ ...ctx, verdict: 'warn', reason });
-      return undefined;
-    }
-    return this.violation(ctx, reason) ? reason : undefined;
+    return flow.when === 'content'
+      ? `data flow: arguments of '${tool}' carry ${flow.label} data returned by ${origin} earlier in this session`
+      : `data flow: '${tool}' may send data out and this session holds ${flow.label} data from ${origin}`;
   }
 
   private async inspectResult(msg: JsonRpcMessage, request: PendingRequest): Promise<JsonRpcMessage> {

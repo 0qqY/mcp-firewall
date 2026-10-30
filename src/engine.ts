@@ -6,6 +6,8 @@ import type { Policy, ToolRule } from './policy.js';
 export interface Decision {
   allowed: boolean;
   reason?: string;
+  /** Set when the call may proceed only once the user approves it; says why. */
+  ask?: string;
 }
 
 const ALLOW: Decision = { allowed: true };
@@ -83,10 +85,11 @@ export function findToolRule(policy: Policy, name: string): ToolRule | undefined
 export function evaluateToolName(policy: Policy, name: string): Decision {
   const rule = findToolRule(policy, name);
   if (rule) {
-    return rule.action === 'allow'
-      ? ALLOW
-      : { allowed: false, reason: rule.reason ?? `tool '${name}' denied by rule '${rule.pattern}'` };
+    if (rule.action === 'allow') return ALLOW;
+    if (rule.action === 'ask') return { allowed: true, ask: rule.reason ?? `tool '${name}' needs approval (rule '${rule.pattern}')` };
+    return { allowed: false, reason: rule.reason ?? `tool '${name}' denied by rule '${rule.pattern}'` };
   }
+  if (policy.tools.default === 'ask') return { allowed: true, ask: `tool '${name}' needs approval (default policy)` };
   return policy.tools.default === 'allow' ? ALLOW : { allowed: false, reason: `tool '${name}' denied by default policy` };
 }
 
@@ -94,7 +97,7 @@ export function evaluateToolCall(policy: Policy, name: string, args: unknown): D
   const byName = evaluateToolName(policy, name);
   if (!byName.allowed) return byName;
   const rule = findToolRule(policy, name);
-  if (!rule) return ALLOW;
+  if (!rule) return byName;
   for (const [key, constraint] of rule.arguments) {
     const target = key === '*' ? args : isObject(args) ? args[key] : undefined;
     for (const value of collectStrings(target)) {
@@ -109,7 +112,8 @@ export function evaluateToolCall(policy: Policy, name: string, args: unknown): D
     const reason = checkPaths(rule.paths, isObject(args) ? args : {});
     if (reason) return { allowed: false, reason };
   }
-  return ALLOW;
+  // Argument checks come first: a call they refuse is never put to the user.
+  return byName;
 }
 
 export function evaluateMethod(policy: Policy, method: string): Decision {

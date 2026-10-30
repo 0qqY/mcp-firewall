@@ -15,6 +15,7 @@ Host ──stdio──► mcp-firewall ──stdio──► Gerçek MCP server
 | Tehdit | Kontrol |
 |---|---|
 | Tehlikeli tool kullanımı | `tools.rules` allow/deny (ilk eşleşen kazanır). Reddedilen tool'lar `tools/list`'ten de gizlenir |
+| Riskli ama gerekli çağrılar | `action: ask`: çağrı bekletilir, kullanıcıya MCP onay penceresiyle (elicitation) sorulur; reddedilen, cevapsız kalan ya da sorulamayan çağrı engellenir |
 | Path traversal | `paths`: yol argümanları kanonik biçimde (`%2e%2e`, `file://`, `~`, `..` çözülmüş, sembolik bağ/junction izlenmiş; Windows'ta kısa adlar, sondaki nokta/boşluk, `::$DATA`) izinli kök dizinlere ve yasak kalıplara göre denetlenir; ağ (UNC) ve aygıt yolları reddedilir |
 | Komut enjeksiyonu | Argüman bazlı `deny` / `allow` regex'leri, `"*"` ile tüm iç içe değerler |
 | Tool poisoning | `descriptionScan`: açıklama, şema değerleri **ve parametre adları** içinde injection kalıpları ve gizli Unicode/ANSI |
@@ -141,6 +142,35 @@ taint:
 - Sınır: model metni kendi sözleriyle yeniden yazar, özetler ya da başka bir dile çevirirse `content` modu bunu
   yakalayamaz; bu durumlar için `session` modu var. Yalnızca `tools/call` sonuçları kaynak olabilir (resource
   okumaları henüz değil).
+
+### Kullanıcı onayı (`ask`)
+Bazı tool'lar ne tamamen yasaklanabilir ne de sorgusuz bırakılabilir (e-posta göndermek, PR açmak, ödeme). Bunlar
+için kuralda `action: ask` kullanın:
+
+```yaml
+tools:
+  rules:
+    - match: "send_email"
+      action: ask
+      reason: "Dışarıya e-posta"
+      arguments:
+        to: { deny: ['@rakip\.example$'] }   # argüman kuralları önce uygulanır; reddedilen çağrı sorulmaz
+approval:
+  timeoutSeconds: 120             # cevap gelmezse çağrı reddedilir
+  fallback: deny                  # istemci soramıyorsa: deny | allow
+  remember: true                  # "bu oturum boyunca bu tool'a izin ver" seçeneği
+```
+
+- Firewall çağrıyı sunucuya iletmez, istemciye `elicitation/create` gönderir. İstemci (ör. Claude Code) kullanıcıya
+  tool adını, sebebi ve argümanların ilk 600 karakterini gösterir. Argümanlardaki görünmez karakterler ve terminal
+  kaçış kodları bu metinden silinir, böylece model gönderdiği içeriği kullanıcıdan gizleyemez. DLP'nin maskelediği
+  secret'lar maskeli görünür.
+- Kullanıcı kabul ederse çağrı sunucuya gider. Reddederse, pencereyi kapatırsa ya da süre dolarsa model "Blocked"
+  tool hatası alır. Beklerken diğer mesajlar akmaya devam eder.
+- İstemci `initialize`'da (MCP 2026-07-28'de istek `_meta`'sında) elicitation desteği bildirmediyse ya da isteği
+  reddederse `fallback` uygulanır.
+- `tools.default: ask` hiçbir kurala uymayan her tool'u, `taint.action: ask` her veri akışı bulgusunu kullanıcıya sorar.
+- `mode: monitor` sormaz; çağrıyı iletir ve loglar.
 
 ### Pinler ve onay
 Firewall ilk görüşte üç şeyi sabitler (pinler): tool tanımlarını, sunucu kodunu ve prompt şablonlarını. `onNew: hide`
@@ -669,6 +699,8 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 - Regex tabanlı argüman denetimi encoding/normalizasyon hilelerine açıktır (ör. `%2e%2e/`, Windows kısa yolları).
   Yol argümanları için `paths` kullanın; `paths` de denetimden sonra değiştirilen bağları (TOCTOU) yakalayamaz.
 - Description taraması kalıp tabanlıdır; yeni ifade biçimlerini kaçırabilir.
+- `ask` onayı istemcinin elicitation desteğine bağlıdır; desteklemeyen istemcide `approval.fallback` uygulanır.
+  Kullanıcı her pencereyi okumadan onaylarsa (onay yorgunluğu) koruma zayıflar; `ask`'ı az sayıda tool'a verin.
 - `taint` içerik modu kelimesi kelimesine taşınan metni yakalar; özetlenmiş, yeniden yazılmış ya da çevrilmiş veriyi
   yakalamaz (bunun için `when: session`).
 - JSON-RPC batch'leri tek tek mesajlar olarak iletilir.
@@ -678,7 +710,7 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 1. Etiketli audit verisiyle model eğitimi ve red team döngüsü
 2. Yol normalizasyonlu `paths` kısıtı — yapıldı (30.10.2026, yukarıda "Yol kısıtı")
 3. Oturum bazlı taint tracking — yapıldı (30.10.2026, yukarıda "Veri akışı takibi")
-4. Riskli çağrılar için human-in-the-loop onayı
+4. Riskli çağrılar için human-in-the-loop onayı — yapıldı (30.10.2026, yukarıda "Kullanıcı onayı")
 5. Streamable HTTP gateway modu (aynı politika motoru)
 6. SIEM çıktısı (syslog / OTLP)
 7. "Görev talimatı" metinlerinde kalan yanlış alarm (Türkçe benchmark: soup05'te %71, soup05-ab2'de %33; iç testte

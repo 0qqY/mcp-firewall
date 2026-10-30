@@ -11,7 +11,7 @@ audit:
   logAllowed: true            # izin verilen tool çağrılarını da logla
 
 tools:
-  default: allow              # hiçbir kurala uymayan tool: allow | deny
+  default: allow              # hiçbir kurala uymayan tool: allow | deny | ask
   # Kurallar yukarıdan aşağı değerlendirilir, İLK eşleşen kazanır (ACL mantığı).
   # match: tool adı veya glob (* ve ?). Regex'ler büyük/küçük harf duyarsızdır.
   # Reddedilen tool'lar tools/list yanıtından da çıkarılır; model onları hiç görmez.
@@ -19,6 +19,11 @@ tools:
     - match: "delete_*"
       action: deny
       reason: "Silme işlemleri bu ortamda yasak"
+
+    # ask: çağrı bekletilir, kullanıcıya onay penceresiyle sorulur (aşağıdaki approval bölümü)
+    - match: "send_email"
+      action: ask
+      reason: "Dışarıya e-posta gönderimi"
 
     - match: "read_file"
       action: allow
@@ -98,11 +103,17 @@ dlp:
     - name: internal_hostname
       pattern: '\b[a-z0-9-]+\.corp\.internal\b'
 
+# action: ask kuralları ve taint.action: ask için kullanıcıya sorma (MCP elicitation).
+approval:
+  timeoutSeconds: 120         # cevap gelmezse çağrı reddedilir
+  fallback: deny              # istemci elicitation desteklemiyorsa: deny | allow
+  remember: true              # pencerede "bu oturum boyunca bu tool'a izin ver" seçeneği
+
 # Veri akışı takibi: kaynak tool'ların döndürdüğü metin, çıkış (sink) tool'larının argümanlarında görülürse
 # çağrı engellenir. Metnin kendisi değil yalnızca özetleri tutulur. sources/sinks boşsa hiçbir şey yapmaz.
 taint:
   enabled: true
-  action: block               # block | warn
+  action: block               # block | warn | ask (kullanıcıya sor)
   scope: shared               # shared: aynı istemcinin tüm firewall'ları etiketleri paylaşır | server: yalnızca bu sunucu
                               # (arada npx/kabuk varsa her sunucuya aynı MCP_FIREWALL_SESSION değerini verin)
   ttlMinutes: 60              # etiketler bu süre sonra düşer (0 = oturum boyunca)

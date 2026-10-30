@@ -8,7 +8,8 @@ import { compilePathPattern, type PathConstraint } from './paths.js';
 import type { TaintConfig, TaintSink, TaintSource } from './taint.js';
 
 export type Mode = 'enforce' | 'monitor';
-export type Action = 'allow' | 'deny';
+/** ask: the call waits until the user approves it (MCP elicitation). */
+export type Action = 'allow' | 'deny' | 'ask';
 
 export interface ArgumentConstraint {
   allow: RegExp[];
@@ -52,6 +53,14 @@ export interface Policy {
     serverCode: 'block' | 'warn' | 'off';
     /** What to do when a `prompts/get` template changed since it was pinned (argument values do not count). */
     prompts: 'block' | 'warn' | 'off';
+  };
+  /** How `ask` rules and taint flows reach the user: an elicitation the client shows, with a time limit. */
+  approval: {
+    timeoutSeconds: number;
+    /** What happens when the client cannot ask (no elicitation support): deny or let the call through. */
+    fallback: 'deny' | 'allow';
+    /** Offer "allow this tool for the rest of the session" in the prompt. */
+    remember: boolean;
   };
   /** Session data-flow tracking: what source tools returned must not leave through sink tools. */
   taint: TaintConfig;
@@ -181,7 +190,7 @@ function compileRule(raw: unknown, path: string, baseDir: string): ToolRule {
   return {
     pattern: r.match,
     match: globToRegExp(r.match),
-    action: oneOf(r.action, ['allow', 'deny'] as const, 'deny', `${path}.action`),
+    action: oneOf(r.action, ['allow', 'deny', 'ask'] as const, 'deny', `${path}.action`),
     reason: r.reason,
     arguments: args,
     paths: compilePaths(r.paths, baseDir, `${path}.paths`),
@@ -216,7 +225,7 @@ function compileTaint(raw: Obj, baseDir: string): TaintConfig {
   }));
   return {
     enabled: bool(raw.enabled, true, 'taint.enabled'),
-    action: oneOf(raw.action, ['block', 'warn'] as const, 'block', 'taint.action'),
+    action: oneOf(raw.action, ['block', 'warn', 'ask'] as const, 'block', 'taint.action'),
     scope: oneOf(raw.scope, ['server', 'shared'] as const, 'shared', 'taint.scope'),
     ttlMinutes: num(raw.ttlMinutes, 60, 0, 10_080, 'taint.ttlMinutes'),
     dir: filePath(raw.dir, 'mcp-firewall-taint', baseDir, 'taint.dir'),
@@ -242,6 +251,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
   const pinning = obj(root.pinning, 'pinning');
   const dlp = obj(root.dlp, 'dlp');
   const taint = obj(root.taint, 'taint');
+  const approval = obj(root.approval, 'approval');
   const ml = obj(root.ml, 'ml');
   const mlScan = obj(ml.scan, 'ml.scan');
   if (ml.injectionLabel !== undefined && typeof ml.injectionLabel !== 'string') throw new PolicyError('ml.injectionLabel: expected a string');
@@ -277,7 +287,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
       logAllowed: bool(audit.logAllowed, true, 'audit.logAllowed'),
     },
     tools: {
-      default: oneOf(tools.default, ['allow', 'deny'] as const, 'allow', 'tools.default'),
+      default: oneOf(tools.default, ['allow', 'deny', 'ask'] as const, 'allow', 'tools.default'),
       rules: rules.map((r, i) => compileRule(r, `tools.rules[${i}]`, baseDir)),
     },
     methods: {
@@ -310,6 +320,11 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
       onNameCollision: oneOf(pinning.onNameCollision, ['hide', 'warn', 'off'] as const, 'warn', 'pinning.onNameCollision'),
       serverCode: oneOf(pinning.serverCode, ['block', 'warn', 'off'] as const, 'block', 'pinning.serverCode'),
       prompts: oneOf(pinning.prompts, ['block', 'warn', 'off'] as const, 'block', 'pinning.prompts'),
+    },
+    approval: {
+      timeoutSeconds: num(approval.timeoutSeconds, 120, 1, 86_400, 'approval.timeoutSeconds'),
+      fallback: oneOf(approval.fallback, ['deny', 'allow'] as const, 'deny', 'approval.fallback'),
+      remember: bool(approval.remember, true, 'approval.remember'),
     },
     taint: compileTaint(taint, baseDir),
     dlp: {

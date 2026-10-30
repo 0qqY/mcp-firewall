@@ -276,3 +276,14 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     `mcp-firewall-taint/<ppid veya MCP_FIREWALL_SESSION>.jsonl` dosyasına ekleyip diğer firewall'ların eklediklerini
     okuyor; süresi dolan dosyalar açılışta siliniyor. Etiketler modelin gördüğü (maskelenmiş) metne göre veriliyor.
     `test/taint.test.ts` 11 test, toplam 107/107 (ML modeli testi hariç).
+66. **Kullanıcı onayı, `action: ask` (30.10.2026):** tool kurallarına ve `tools.default`'a `ask`, `taint.action`'a
+    `ask` eklendi. Argüman, `paths` ve DLP denetimlerinden geçen çağrı sunucuya iletilmiyor; firewall istemciye
+    kendi id'siyle (`mcp-firewall-approval-N`) `elicitation/create` gönderiyor ve cevabı sunucuya iletmeden
+    yakalıyor. Bekleme istemci kuyruğunu durdurmuyor: aynı anda gelen diğer çağrılar geçiyor. Cevap `accept` ise
+    çağrı iletiliyor, `remember` işaretliyse tool oturum boyunca bir daha sorulmuyor. `decline`/`cancel`, hata
+    yanıtı ya da `approval.timeoutSeconds` (120) sonunda çağrı reddediliyor; zaman aşımında istemciye
+    `notifications/cancelled` gidiyor, geç gelen cevap düşürülüyor. Elicitation desteği `initialize`
+    `capabilities`'ten ya da 2026-07-28'de istek `_meta`'sından okunuyor; yoksa `approval.fallback` (deny).
+    Pencere metninde argümanlardan görünmez karakterler ve ANSI kodları siliniyor. Testte bulunan: cevapsız
+    pencerenin zamanlayıcısı süreci 120 sn açık tutuyordu, `unref()` edildi. `test/approval.test.ts` 13 test,
+    toplam 120/120 (ML modeli testi hariç).

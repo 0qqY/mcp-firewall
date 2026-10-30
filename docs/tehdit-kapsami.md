@@ -191,6 +191,10 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
     etiketi veriyor. Aynı istemcinin firewall'ları etiketleri ortak bir dosyada paylaşıyor (WhatsApp ve GitHub
     toxic flow örnekleri tek sunucuda, dosya sistemi → Slack gibi akışlar sunucular arası). Kalan sınır: yeniden
     yazılmış veya çevrilmiş veri. 107/107 test (ML modeli testi hariç).
+24. Kullanıcı onayı (30.10.2026): `action: ask` kuralları ve `taint.action: ask` çağrıyı bekletip kullanıcıya MCP
+    elicitation penceresiyle soruyor. Pencerede argümanlar görünmez karakterlerden temizlenmiş olarak gösteriliyor.
+    Reddedilen, 120 sn içinde cevaplanmayan ya da sorulamayan (istemci desteklemiyor) çağrı engelleniyor. Kalan
+    sınır: onay yorgunluğu ve elicitation desteklemeyen istemciler. 120/120 test (ML modeli testi hariç).
 
 **Sıradakiler:**
 
