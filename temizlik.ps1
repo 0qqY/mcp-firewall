@@ -3,8 +3,8 @@
 #   powershell -ExecutionPolicy Bypass -File temizlik.ps1          # listele, onaylanırsa sil
 #   powershell -ExecutionPolicy Bypass -File temizlik.ps1 -Liste   # yalnızca listele
 #
-# Kalanlar: models/mcp-pi-mmbert-soup05-ab2 (varsayılan model), models/mcp-pi-mmbert-soup05 (önceki varsayılan,
-# geri dönmek için), models/protectai-deberta-v3-pi-v2 (hazır baseline, test yedeği), training/runs altında iki
+# Kalanlar: models/mcp-pi-mmbert-soup04-ab4 (varsayılan model), models/mcp-pi-mmbert-soup05-ab2 ve
+# models/mcp-pi-mmbert-soup05 (önceki varsayılanlar, geri dönmek için), models/protectai-deberta-v3-pi-v2 (hazır baseline, test yedeği), training/runs altında iki
 # soup'un ve bileşenlerinin best klasörleri (yeniden karıştırma ve değerlendirme için), görev talimatı
 # denemelerinin best klasörleri, training/runs/mcp-pi-v9 (gerekirse v9'a dönmek için), eğitim verisi, loglar,
 # eğitim ortamı (venv) ve mmBERT-base önbelleği.
@@ -21,12 +21,19 @@ foreach ($r in 'mcp-pi', 'mcp-pi-v2', 'mcp-pi-v3', 'mcp-pi-v3b', 'mcp-pi-v4', 'm
                'smoke', 'smoke-bf16', 'smoke-fp32') {
     $targets += Join-Path $runs $r
 }
+# Sert-negatif turunun denenip seçilmeyen soup'ları (bileşenlerden combine.py ile saniyeler içinde yeniden üretilir)
+foreach ($r in 'mcp-pi-mmbert-soup05-ab3', 'mcp-pi-mmbert-soup05-a4b3', 'mcp-pi-mmbert-soup05-ab4', 'mcp-pi-mmbert-soup03-ab4',
+               'mcp-pi-mmbert-b2b4', 'mcp-pi-mmbert-soup05-ab24', 'mcp-pi-mmbert-soup06-ab24', 'mcp-pi-mmbert-soup05-ab5',
+               'mcp-pi-mmbert-soup04-ab5') {
+    $targets += Join-Path $runs $r
+}
 # mmBERT eğitimlerinin ara checkpoint'leri (best klasörleri kalıyor)
-foreach ($r in 'mcp-pi-mmbert', 'mcp-pi-mmbert-v4', 'mcp-pi-mmbert-task', 'mcp-pi-mmbert-v4task', 'mcp-pi-mmbert-v4nomask') {
+foreach ($r in 'mcp-pi-mmbert', 'mcp-pi-mmbert-v4', 'mcp-pi-mmbert-task', 'mcp-pi-mmbert-v4task', 'mcp-pi-mmbert-v4nomask',
+               'mcp-pi-mmbert-dev', 'mcp-pi-mmbert-v4dev', 'mcp-pi-mmbert-dev2', 'mcp-pi-mmbert-dev3') {
     $targets += @(Get-ChildItem (Join-Path $runs $r) -Directory -Filter 'checkpoint-*' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
 }
 # Eski ONNX modelleri (v9 gerekirse training/runs/mcp-pi-v9/best'ten export_onnx.py ile yeniden üretilir)
-foreach ($m in 'mcp-pi-v1', 'mcp-pi-v2', 'mcp-pi-v7', 'mcp-pi-v9') {
+foreach ($m in 'mcp-pi-v1', 'mcp-pi-v2', 'mcp-pi-v7', 'mcp-pi-v9', 'mcp-pi-mmbert-soup05-ab3') {
     $targets += Join-Path $root "models\$m"
 }
 # Artık gerekmeyen Hugging Face önbellekleri (gerekirse ilk kullanımda yeniden iner)
@@ -37,9 +44,11 @@ foreach ($h in 'models--answerdotai--ModernBERT-base', 'models--microsoft--deber
     $targets += Join-Path $hub $h
 }
 
-$keep = @((Join-Path $root 'models\mcp-pi-mmbert-soup05-ab2'), (Join-Path $root 'models\mcp-pi-mmbert-soup05'),
-          (Join-Path $runs 'mcp-pi-mmbert-soup05-ab2'), (Join-Path $runs 'mcp-pi-mmbert-soup05'),
-          (Join-Path $runs 'mcp-pi-mmbert\best'), (Join-Path $runs 'mcp-pi-mmbert-v4\best'), (Join-Path $runs 'mcp-pi-mmbert-task\best'))
+$keep = @((Join-Path $root 'models\mcp-pi-mmbert-soup04-ab4'), (Join-Path $root 'models\mcp-pi-mmbert-soup05-ab2'),
+          (Join-Path $root 'models\mcp-pi-mmbert-soup05'),
+          (Join-Path $runs 'mcp-pi-mmbert-soup04-ab4'), (Join-Path $runs 'mcp-pi-mmbert-soup05-ab2'), (Join-Path $runs 'mcp-pi-mmbert-soup05'),
+          (Join-Path $runs 'mcp-pi-mmbert\best'), (Join-Path $runs 'mcp-pi-mmbert-v4\best'), (Join-Path $runs 'mcp-pi-mmbert-task\best'),
+          (Join-Path $runs 'mcp-pi-mmbert-dev2\best'))
 foreach ($k in $keep) {
     if ($targets -contains $k) { throw "liste korunması gereken bir klasörü içeriyor: $k" }
 }
@@ -57,5 +66,5 @@ if ($Liste) { return }
 if ((Read-Host 'Bunlar kalıcı olarak silinsin mi? (e/h)') -ne 'e') { 'İptal edildi.'; return }
 foreach ($r in $rows) { Remove-Item -LiteralPath $r.Tam -Recurse -Force }
 "Silindi: $total GB."
-if (-not (Test-Path (Join-Path $root 'models\mcp-pi-mmbert-soup05-ab2\onnx\model.onnx'))) { throw 'varsayılan model bulunamadı!' }
-'Varsayılan model yerinde: models\mcp-pi-mmbert-soup05-ab2'
+if (-not (Test-Path (Join-Path $root 'models\mcp-pi-mmbert-soup04-ab4\onnx\model.onnx'))) { throw 'varsayılan model bulunamadı!' }
+'Varsayılan model yerinde: models\mcp-pi-mmbert-soup04-ab4'

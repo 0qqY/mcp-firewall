@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const libDir = dirname(fileURLToPath(import.meta.url));
 export const REPO = resolve(libDir, '..', '..');
 const CLI = join(REPO, 'dist', 'src', 'cli.js');
-export const MODEL = process.env.MCP_FIREWALL_MODEL ?? join(REPO, 'models', 'mcp-pi-mmbert-soup05-ab2');
+export const MODEL = process.env.MCP_FIREWALL_MODEL ?? join(REPO, 'models', 'mcp-pi-mmbert-soup04-ab4');
 if (!existsSync(CLI)) throw new Error(`build first (npm run build): ${CLI} is missing`);
 
 export function writePolicy(dir, name, lines) {

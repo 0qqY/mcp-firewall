@@ -5,7 +5,7 @@
 //   node demo/toxic-agent-flow/run.mjs
 //
 // Needs a built dist (npm run build) and a local model. Override the model path with MCP_FIREWALL_MODEL;
-// the default is ./models/mcp-pi-mmbert-soup05-ab2 at the repo root.
+// the default is ./models/mcp-pi-mmbert-soup04-ab4 at the repo root.
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..', '..');
 const cli = join(repo, 'dist', 'src', 'cli.js');
-const model = process.env.MCP_FIREWALL_MODEL ?? join(repo, 'models', 'mcp-pi-mmbert-soup05-ab2');
+const model = process.env.MCP_FIREWALL_MODEL ?? join(repo, 'models', 'mcp-pi-mmbert-soup04-ab4');
 if (!existsSync(cli)) throw new Error(`build the project first (npm run build): ${cli} is missing`);
 if (!existsSync(model)) throw new Error(`model not found: ${model}. Set MCP_FIREWALL_MODEL to its path.`);
 

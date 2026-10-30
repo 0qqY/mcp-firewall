@@ -100,7 +100,7 @@ dlp:
 # Katman 2: ML prompt-injection sınıflandırıcısı (yerel ONNX, internete çıkmaz)
 ml:
   enabled: false
-  model: ./models/mcp-pi-mmbert-soup05-ab2   # transformers.js uyumlu dizin (README: "Varsayılan model")
+  model: ./models/mcp-pi-mmbert-soup04-ab4   # transformers.js uyumlu dizin (README: "Varsayılan model")
                                              # hazır baseline: ./models/protectai-deberta-v3-pi-v2 (fetch_baseline.ps1)
   dtype: fp32                 # fp32 (onnx/model.onnx) | q8 (onnx/model_quantized.onnx; yalnızca export_onnx.py
                               # int8 kontrolünü geçen modellerde bulunur, mmBERT ve DeBERTa'da geçmiyor)

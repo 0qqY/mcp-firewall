@@ -8,7 +8,7 @@ import { scoreTexts } from '../src/ml/classifier.js';
 import { loadTransformersClassifier } from '../src/ml/transformers.js';
 
 const hasModel = (dir: string): boolean => existsSync(resolve(dir, 'onnx', 'model.onnx'));
-const candidates = ['models/mcp-pi-mmbert-soup05-ab2', 'models/protectai-deberta-v3-pi-v2'].map((d) => resolve(d));
+const candidates = ['models/mcp-pi-mmbert-soup04-ab4', 'models/protectai-deberta-v3-pi-v2'].map((d) => resolve(d));
 const modelDir = process.env.MCPFW_TEST_MODEL ? resolve(process.env.MCPFW_TEST_MODEL) : (candidates.find(hasModel) ?? candidates[0]);
 const skip = hasModel(modelDir) ? false : `no model at ${modelDir}`;
 

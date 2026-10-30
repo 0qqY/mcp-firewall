@@ -246,3 +246,15 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     Ortak `structuredToken` muafiyeti (`\d+T\d+`, `u<4 hex>`, `x<2 hex>`) iki dala da eklendi; gerçek l33t
     geri-yazımı (`7he c0st 0f` → `the cost of`, `1gn0r3` → `ignore`) korunuyor. `test/decode.ts`'e iki
     "değişmeden kalır" satırı (ISO + escape) eklendi. 88/88 test.
+63. **Varsayılan model soup04-ab4 oldu (30.10.2026):** soup05-ab2 bu deponun kendi commit mesajlarının ve
+    Markdown paragraflarının %13'ünü saldırı sayıyordu. `training/dev_corpus.py` güvenlik mühendisliği konulu
+    zararsız metin ve saldırılı eşlerini üretiyor (`--dev-corpus`). `voiced()` ise geliştirici diliyle yazılıp ajana
+    hitap eden saldırılar ve zararsız eşlerini ekliyor (`--dev-voiced`). Yalnızca konu metniyle eğitilen B3 yanlış
+    alarmı %4'e indirdi ama geliştirici diliyle yazılmış saldırıları kaçırdı. Bunu eğitimde görülmemiş bir setle
+    doğruladık: 3nesdeniz/agentic-prompt-injection-boundary-pairs'te isabet %66'dan %58'e indi. B4 (iki veri birlikte)
+    gece boyunca 0,3–0,6 oranlarında karıştırıldı. Saldırının görevini tekrarlayan eşleri çıkaran B5 denemesi
+    (`--no-close-mirrors`) kaçan Türkçe ve LLMail saldırılarını geri getirmedi. Seçilen A+B4 (0,4): gerçek metin FPR
+    %13,2 → %6,6, sınır seti %65,8/%27,3 → %69,7/%24,2, LLMail %99,0 (=), Türkçe FPR %12,3 → %8,7. Bedeli:
+    çevrilmiş set FPR %0,8 → %2,2, İngilizce görev talimatı FPR %39 → %53. ONNX fp32 (int8 silindi), Node 798 satırda
+    0 karar farkı, 88/88 test. `policy.example.yaml`, demolar, gerçek model testi ve `temizlik.ps1` yeni dizini
+    kullanıyor; önceki model `models/mcp-pi-mmbert-soup05-ab2` geri dönüş için duruyor.

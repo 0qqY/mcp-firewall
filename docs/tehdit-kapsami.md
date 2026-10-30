@@ -8,8 +8,9 @@ Saldırılar üç gruba ayrıldı:
 - **Zayıfız:** Firewall saldırıyı kısmen görür, ancak bilinen bir boşluk veya düşük isabet var.
 - **Engelleyemezdik:** Saldırı, firewall'un gördüğü JSON-RPC trafiğinin dışında gerçekleşir.
 
-Ölçümler varsayılan model mmBERT soup05-ab2'ye göre verilmiştir (eşik 0,9, 1500 karakterlik parçalar, firewall'un
-kod çözme ve gizleme geri alma adımlarından sonraki metin). 27.10.2026'dan önceki varsayılan v9'un değerleri parantez içinde.
+Ölçümler mmBERT soup05-ab2'ye göre verilmiştir (eşik 0,9, 1500 karakterlik parçalar, firewall'un kod çözme ve
+gizleme geri alma adımlarından sonraki metin). 27.10.2026'dan önceki varsayılan v9'un değerleri parantez içinde.
+30.10.2026'dan beri varsayılan model soup04-ab4; farkları "İyileştirmeler" 21. maddede.
 
 ## Firewall'un gördüğü ve görmediği trafik
 
@@ -172,12 +173,19 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
     `aws_secret_key` detektörü — değer `(aws_)secret_access_key` etiketiyle `=`/`:` sonrası geldiğinde maskeleniyor,
     çıplak 40 karakterlik base64 ise yanlış alarm olmasın diye bırakılıyor. Artık `config.env` DLP'de maskelenip
     geçiyor (87/87 test).
+21. Varsayılan model soup04-ab4 oldu (30.10.2026; çeviri bileşenine güvenlik mühendisliği metni ve geliştirici
+    diliyle yazılmış saldırılar eklendi, karışım oranı 0,4). Depodaki gerçek geliştirici metinlerinde yanlış alarm
+    %13'ten %7'ye indi (commit mesajlarında %17'den %0'a). Eğitimde görülmemiş sınır çiftleri setinde isabet
+    %66'dan %70'e çıktı (tool kötüye kullanımında %48'den %78'e), yanlış alarm %27'den %24'e indi. LLMail %99'da
+    kaldı; Türkçe isabet %90'dan %89'a indi, Türkçe yanlış alarm %12'den %9'a indi. Bedeli: çevrilmiş setteki
+    zararsız metinlerde yanlış alarm %0,8'den %2,2'ye, İngilizce görev talimatlarında %39'dan %53'e çıktı. Node'da
+    798 satırda PyTorch ile aynı karar (88/88 test).
 
 **Sıradakiler:**
 
-1. Türkçe "görev talimatı" metinlerinde kalan yanlış alarm (%33) ve dış Türkçe setlerdeki düşük isabet (%48–65).
+1. "Görev talimatı" metinlerinde kalan yanlış alarm (Türkçe benchmark %33, iç testte İngilizce %53) ve dış Türkçe setlerdeki düşük isabet (%48–65).
 2. Belgelere eklenecek tavsiyeler: sunucuları sandbox veya container içinde ve sınırlı ağ erişimiyle çalıştırmak; paket sürümünü sabitlemek.
-3. Güvenlik konulu zararsız metinlerde kalan yanlış alarm: konusu prompt olan commit mesajları ("Add prompt template pinning" 0,996) ve saldırı örneği içeren belgeler. Zor negatif verisi gerekiyor. Ayrıca leet çözücü ISO tarihlerini (`28T07`) ve `\uXXXX` kaçışlarını bozuyor.
+3. Güvenlik konulu zararsız metinlerde kalan yanlış alarm: soup04-ab4 depodaki Markdown paragraflarının %11'ini hâlâ saldırı sayıyor (çoğu saldırı örneği içeren belgeler). Sınır çiftleri setinde RAG bağlamı zehirleme isabeti %66'dan %58'e indi.
 
 ## Kaynaklar
 
