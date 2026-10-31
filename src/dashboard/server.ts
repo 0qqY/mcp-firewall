@@ -28,7 +28,7 @@ export interface StoredEvent extends AuditEvent {
 
 interface LabelRecord {
   eventId: number;
-  review: Review;
+  review: Review | 'none';
   reviewedAt: string;
   server?: string;
   tool?: string;
@@ -82,7 +82,10 @@ function readLabels(file: string): Map<number, LabelRecord> {
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     try {
       const r = JSON.parse(line) as LabelRecord;
-      if (typeof r.eventId === 'number') labels.set(r.eventId, r);
+      // The file is append-only: a later `none` record withdraws the label (a mis-click undone in the panel).
+      if (typeof r.eventId !== 'number') continue;
+      if (r.review === 'none') labels.delete(r.eventId);
+      else labels.set(r.eventId, r);
     } catch {
       // ignore blank or partial lines
     }
@@ -149,11 +152,16 @@ export function startDashboard(opts: DashboardOptions): Server {
           return json(res, 403, { error: 'forbidden' });
         }
         const { eventId, review } = JSON.parse(await readBody(req)) as { eventId: unknown; review: unknown };
-        if (typeof eventId !== 'number' || (review !== 'true_positive' && review !== 'false_positive')) {
+        if (typeof eventId !== 'number' || (review !== 'true_positive' && review !== 'false_positive' && review !== 'none')) {
           return json(res, 400, { error: 'expected eventId and review' });
         }
         const event = readAudit(auditFile).find((e) => e.id === eventId);
         if (!event) return json(res, 404, { error: 'event not found' });
+        mkdirSync(dirname(labelsFile), { recursive: true });
+        if (review === 'none') {
+          appendFileSync(labelsFile, `${JSON.stringify({ eventId, review, reviewedAt: new Date().toISOString() })}\n`);
+          return json(res, 200, { ok: true, trainable: false });
+        }
         const record: LabelRecord = {
           eventId,
           review,
@@ -164,7 +172,6 @@ export function startDashboard(opts: DashboardOptions): Server {
           source: 'audit_review',
           ...(event.excerpt ? { text: event.excerpt, label: review === 'true_positive' ? 1 : 0 } : {}),
         };
-        mkdirSync(dirname(labelsFile), { recursive: true });
         appendFileSync(labelsFile, `${JSON.stringify(record)}\n`);
         return json(res, 200, { ok: true, trainable: record.text !== undefined });
       }

@@ -28,10 +28,10 @@ const ICONS = {
 };
 
 const CATEGORIES = {
-  injection: { label: 'Prompt injection', short: 'Injection', icon: 'zap', bg: '#fff1e6', fg: '#e8590c' },
-  poisoning: { label: 'Tool poisoning', short: 'Poisoning', icon: 'alert', bg: '#ffe9ea', fg: '#e5484d' },
+  injection: { label: 'Prompt enjeksiyonu', short: 'Enjeksiyon', icon: 'zap', bg: '#fff1e6', fg: '#e8590c' },
+  poisoning: { label: 'Araç zehirleme', short: 'Zehirleme', icon: 'alert', bg: '#ffe9ea', fg: '#e5484d' },
   dlp: { label: 'Veri sızıntısı', short: 'DLP', icon: 'lock', bg: '#e6ecff', fg: '#0038ff' },
-  rugpull: { label: 'Rug pull', short: 'Rug pull', icon: 'refresh', bg: '#f3e8ff', fg: '#8e4ec6' },
+  rugpull: { label: 'Sonradan değişen araç', short: 'Değişiklik', icon: 'refresh', bg: '#f3e8ff', fg: '#8e4ec6' },
   policy: { label: 'Politika ihlali', short: 'Politika', icon: 'shield', bg: '#e8f6ee', fg: '#30a46c' },
   method: { label: 'Yetkisiz metod', short: 'Metod', icon: 'server', bg: '#e6f4fe', fg: '#0b84d6' },
   protocol: { label: 'Protokol hatası', short: 'Protokol', icon: 'file', bg: '#f1f2f4', fg: '#646a73' },
@@ -225,7 +225,7 @@ function maskedBlock(e) {
     h('div', { class: 'masked-h' }, `Maskelenen veri · ${e.masked.length}`),
     e.masked.map((m) => h('div', { class: 'masked-row' },
       h('div', { class: 'masked-top' },
-        h('b', {}, m.detector),
+        h('b', {}, dlpName(m.detector)),
         h('span', {}, m.where ? `konum: ${m.where}` : 'konum: metin'),
         m.hint ? h('span', { class: 'hint' }, `…${m.hint}`) : null),
       m.context ? h('div', { class: 'masked-ctx' }, redactedText(m.context)) : null)),
@@ -305,6 +305,114 @@ function radarData(detections) {
   });
 }
 
+// ---------- Turkish reasons ----------
+
+// The firewall writes its audit reasons in English (they also reach the model and the SIEM); the panel shows them
+// in Turkish. Policy reasons written by the user pass through unchanged, and so does anything not listed here.
+const DLP_NAMES = {
+  private_key: 'özel anahtar', aws_access_key: 'AWS erişim anahtarı', aws_secret_key: 'AWS gizli anahtarı',
+  github_token: 'GitHub token', slack_token: 'Slack token', anthropic_key: 'Anthropic API anahtarı',
+  openai_key: 'OpenAI API anahtarı', jwt: 'JWT', credit_card: 'kredi kartı', iban_tr: 'IBAN', tckn: 'T.C. kimlik no',
+};
+const dlpName = (name) => DLP_NAMES[name] ?? name;
+const WHERE = { arguments: 'argümanlarda', result: 'sonuçta', error: 'hata mesajında' };
+const MODES = { enforce: 'engelleme', monitor: 'izleme' };
+const ANSWERS = { decline: 'reddetti', cancel: 'iptal etti', 'no answer': 'yanıt yok' };
+const where = (w) => WHERE[w] ?? w;
+const failText = (mode) => ({ closed: 'hata olursa engeller', open: 'hata olursa geçirir' })[mode] ?? `hata modu ${mode ?? '—'}`;
+const DLP_ACTIONS = { redact: 'maskele', block: 'engelle', warn: 'uyar' };
+const origin = (o) => o.replace(/^'([^']*)' on (.+)$/, "'$1' ($2)");
+
+const REASONS = [
+  [/tool definition changed since it was pinned \(possible rug pull\)/g, 'araç tanımı sabitlendikten sonra değişti (sessizce değiştirilmiş olabilir: rug pull)'],
+  [/new tool definition pinned/g, 'yeni araç tanımı sabitlendi'],
+  [/tool name also exposed by another server \((.*?)\); possible tool shadowing/g, 'araç adı başka bir sunucuda da var ($1); olası araç gölgeleme'],
+  [/tool list changed; definitions are re-verified on the next tools\/list/g, 'araç listesi değişti; tanımlar bir sonraki tools/list çağrısında yeniden doğrulanacak'],
+  [/firewall started in (\w+) mode/g, (_, m) => `firewall ${MODES[m] ?? m} modunda başladı`],
+  [/gateway started in (\w+) mode: /g, (_, m) => `ağ geçidi ${MODES[m] ?? m} modunda başladı: `],
+  [/ML classifier (\S+) loaded in (\d+) ms/g, 'ML sınıflandırıcı $1, $2 ms içinde yüklendi'],
+  [/ML classifier flagged possible prompt injection \(score ([\d.]+)\)/g, 'ML sınıflandırıcı olası prompt enjeksiyonu buldu (skor $1)'],
+  [/ML classifier failed: /g, 'ML sınıflandırıcı hata verdi: '],
+  [/text too long to scan fully: only the first and last (\d+) chunks were checked/g, 'metin tamamı taranamayacak kadar uzun: yalnızca ilk ve son $1 parça kontrol edildi'],
+  [/encoded sensitive data in (\w+): /g, (_, w) => `${where(w)} kodlanmış hassas veri: `],
+  [/sensitive data in (\w+): /g, (_, w) => `${where(w)} hassas veri: `],
+  [/\b([a-z_]+) x(\d+)\b/g, (s, name, n) => (DLP_NAMES[name] ? `${DLP_NAMES[name]} ×${n}` : s)],
+  [/hidden characters or terminal escape sequences in (\w+) \((\d+)\)/g, (_, w, n) => `${where(w)} gizli karakter veya terminal kaçış dizisi (${n})`],
+  [/tool '([^']*)' needs approval \(rule '([^']*)'\)/g, "'$1' aracı onay gerektiriyor ('$2' kuralı)"],
+  [/tool '([^']*)' denied by rule '([^']*)'/g, "'$1' aracı '$2' kuralıyla reddedildi"],
+  [/tool '([^']*)' denied by default policy/g, "'$1' aracı varsayılan politikayla reddedildi"],
+  [/method '([^']*)' denied by policy/g, "'$1' metodu politikayla reddedildi"],
+  [/argument '([^']*)' matches deny pattern /g, "'$1' argümanı yasak desenle eşleşiyor: "],
+  [/argument '([^']*)' is not in the allow list/g, "'$1' argümanı izin listesinde değil"],
+  [/argument '([^']*)' is not a path string/g, "'$1' argümanı bir dosya yolu değil"],
+  [/argument '([^']*)' resolves to '([^']*)', denied by path '([^']*)'/g, "'$1' argümanı '$2' yolunu gösteriyor; '$3' yolu yasak"],
+  [/argument '([^']*)' resolves to '([^']*)', outside the allowed paths/g, "'$1' argümanı '$2' yolunu gösteriyor; izin verilen yolların dışında"],
+  [/argument '([^']*)' names a file with (\d+) hard links; its other names may be outside the allowed paths/g, "'$1' argümanı $2 sabit bağlantısı olan bir dosyayı gösteriyor; diğer adları izin verilen yolların dışında olabilir"],
+  [/argument '([^']*)': /g, "'$1' argümanı: "],
+  [/control character in decoded path/g, 'çözülmüş yolda kontrol karakteri'],
+  [/control character in path/g, 'yolda kontrol karakteri'],
+  [/not a valid path: /g, 'geçerli bir yol değil: '],
+  [/data flow: arguments of '([^']*)' carry (\S+) data returned by (.+?) earlier in this session/g,
+    (_, tool, label, from) => `veri akışı: '${tool}' argümanları, bu oturumda daha önce ${origin(from)} tarafından döndürülen ${label} veriyi taşıyor`],
+  [/data flow: '([^']*)' may send data out and this session holds (\S+) data from (.+?)(?=;|$)/g,
+    (_, tool, label, from) => `veri akışı: '${tool}' veriyi dışarı gönderebilir ve bu oturumda ${origin(from)} kaynaklı ${label} veri var`],
+  [/session labelled (.*?) by this result/g, 'bu sonuç oturumu "$1" olarak etiketledi'],
+  [/approval required, forwarded in monitor mode: /g, 'onay gerekiyor, izleme modunda iletildi: '],
+  [/allowed for this session by the user earlier: /g, 'kullanıcı bu oturum için daha önce izin verdi: '],
+  [/needs user approval but the client cannot ask \(no elicitation support\)/g, 'kullanıcı onayı gerekiyor ama istemci soru soramıyor (elicitation desteği yok)'],
+  [/needs user approval but the client refused the prompt/g, 'kullanıcı onayı gerekiyor ama istemci soruyu reddetti'],
+  [/; allowed by approval\.fallback: /g, '; approval.fallback ayarıyla izin verildi: '],
+  [/, so the call is refused: /g, ', bu yüzden çağrı reddedildi: '],
+  [/waiting for user approval: /g, 'kullanıcı onayı bekleniyor: '],
+  [/no answer to the approval prompt within (\d+) s: /g, 'onay sorusuna $1 sn içinde yanıt gelmedi: '],
+  [/the user did not approve the call \(([^)]*)\): /g, (_, a) => `kullanıcı çağrıyı onaylamadı (${ANSWERS[a] ?? a}): `],
+  [/approved by the user for this session: /g, 'kullanıcı bu oturum için onayladı: '],
+  [/approved by the user: /g, 'kullanıcı onayladı: '],
+  [/server request uses the id space of firewall approval prompts/g, 'sunucu isteği, firewall onay sorularına ayrılmış kimlikleri kullanıyor'],
+  [/server code could not be located; pass --code <path> to pin it/g, 'sunucu kodu bulunamadı; sabitlemek için --code <yol> verin'],
+  [/server code fingerprint failed: /g, 'sunucu kodunun parmak izi alınamadı: '],
+  [/server code pinned: /g, 'sunucu kodu sabitlendi: '],
+  [/server code changed since it was pinned \((.*?)\); possible package rug pull/g, 'sunucu kodu sabitlendikten sonra değişti ($1); paket sessizce değişmiş olabilir (rug pull)'],
+  [/code fingerprint stopped after (\d+) files or (\d+) MB/g, 'kod parmak izi $1 dosya ya da $2 MB sonra durdu'],
+  [/code path not found: /g, 'kod yolu bulunamadı: '],
+  [/package (\S+) is not pinned to an exact version \((.*?)\); updates install without review/g, '$1 paketi kesin bir sürüme sabitlenmemiş ($2); güncellemeler incelenmeden kurulur'],
+  [/pin store unreadable, treating the prompt template as changed: /g, 'sabitleme kaydı okunamadı, prompt şablonu değişmiş sayılıyor: '],
+  [/pin store unreadable, treating all tools as changed: /g, 'sabitleme kaydı okunamadı, tüm araçlar değişmiş sayılıyor: '],
+  [/new prompt template pinned \((.*?)\)/g, 'yeni prompt şablonu sabitlendi ($1)'],
+  [/new prompt template held until approved \((.*?)\): /g, 'yeni prompt şablonu onaylanana kadar bekletiliyor ($1): '],
+  [/prompt template changed since it was pinned \((.*?)\); possible rug pull/g, 'prompt şablonu sabitlendikten sonra değişti ($1); sessizce değiştirilmiş olabilir (rug pull)'],
+  [/\. Review it, then run: /g, '. İnceleyin, sonra çalıştırın: '],
+  [/possible prompt poisoning: /g, 'olası prompt zehirlemesi: '],
+  [/possible tool poisoning: /g, 'olası araç zehirlemesi: '],
+  [/server instructions removed: /g, 'sunucu talimatları kaldırıldı: '],
+  [/suspicious pattern /g, 'şüpheli desen '],
+  [/hidden unicode characters/g, 'gizli Unicode karakterler'],
+  [/sampling rate limit: more than (\d+) requests per minute/g, 'örnekleme hız sınırı: dakikada $1 istekten fazla'],
+  [/sampling limit: (\d+) requests per session reached/g, 'örnekleme sınırı: oturum başına $1 isteğe ulaşıldı'],
+  [/sampling maxTokens (\d+) lowered to (\d+)/g, 'örnekleme maxTokens değeri $1 yerine $2 yapıldı'],
+  [/sampling token budget: (\d+) tokens per session would be exceeded \((\d+) used, (\d+) asked\)/g, 'örnekleme token bütçesi: oturum başına $1 token aşılacaktı ($2 kullanıldı, $3 istendi)'],
+  [/malformed JSON-RPC message dropped/g, 'bozuk JSON-RPC mesajı atıldı'],
+  [/oversized message dropped/g, 'çok büyük mesaj atıldı'],
+  [/internal error: /g, 'iç hata: '],
+  [/gateway: request for host (.*?) refused/g, 'ağ geçidi: $1 adresi için gelen istek reddedildi'],
+  [/gateway: request from origin (.*?) refused/g, 'ağ geçidi: $1 kaynağından gelen istek reddedildi'],
+  [/gateway: idle session (\S+) closed/g, 'ağ geçidi: boşta kalan $1 oturumu kapatıldı'],
+  [/gateway: upstream GET stream failed: /g, 'ağ geçidi: uzak sunucunun GET akışı kesildi: '],
+  [/gateway error: /g, 'ağ geçidi hatası: '],
+  [/gateway: /g, 'ağ geçidi: '],
+];
+
+function trReason(text) {
+  return text ? REASONS.reduce((s, [re, to]) => s.replace(re, to), text) : text;
+}
+
+const TOOLS_TR = { '(server code)': '(sunucu kodu)' };
+
+/** Turkish display copies; `reasonRaw` keeps the audit text as the firewall wrote it. */
+function localize(e) {
+  return { ...e, reasonRaw: e.reason, reason: trReason(e.reason), tool: TOOLS_TR[e.tool] ?? e.tool };
+}
+
 // ---------- data loading ----------
 
 async function load() {
@@ -313,6 +421,7 @@ async function load() {
     const res = await fetch(`/api/events${state.server ? `?server=${encodeURIComponent(state.server)}` : ''}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(res.statusText);
     const data = await res.json();
+    data.events = data.events.map(localize);
     state.lastRead = new Date();
     live.classList.remove('stale');
     renderStatus(data.config);
@@ -331,7 +440,9 @@ async function load() {
   }
 }
 
+/** Clicking the label the event already has withdraws it. */
 async function label(e, review) {
+  if (state.data.labels[e.id] === review) review = 'none';
   try {
     const res = await fetch('/api/labels', {
       method: 'POST',
@@ -340,8 +451,9 @@ async function label(e, review) {
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error);
-    state.data.labels[e.id] = review;
-    toast(body.trainable ? 'Etiket kaydedildi · eğitim verisine eklendi' : 'Etiket kaydedildi');
+    if (review === 'none') delete state.data.labels[e.id];
+    else state.data.labels[e.id] = review;
+    toast(review === 'none' ? 'Etiket geri alındı' : body.trainable ? 'Etiket kaydedildi · eğitim verisine eklendi' : 'Etiket kaydedildi');
     render();
   } catch (err) {
     toast(`Etiket kaydedilemedi: ${err.message}`);
@@ -380,14 +492,15 @@ function renderChrome() {
 
   const bell = document.getElementById('bell');
   const recentBlocks = detections.filter((e) => BLOCKS.has(e.verdict) && ago(e.ts) < 3600e3).length;
-  bell.replaceChildren(icon('bell', 17), recentBlocks ? h('span', { class: 'dot' }) : null);
+  bell.replaceChildren(icon('bell', 17), ...(recentBlocks ? [h('span', { class: 'dot' })] : []));
   bell.title = recentBlocks ? `Son 1 saatte ${recentBlocks} engelleme` : 'Son 1 saatte engelleme yok';
 }
 
 function renderStatus(config = derive().config) {
   const live = document.getElementById('live');
   const stale = live.classList.contains('stale');
-  const mode = config.mode ? config.mode[0].toUpperCase() + config.mode.slice(1) : '';
+  const name = MODES[config.mode] ?? config.mode;
+  const mode = name ? `${name[0].toLocaleUpperCase('tr-TR')}${name.slice(1)} modu` : '';
   live.classList.toggle('monitor', config.mode === 'monitor');
   document.getElementById('mode-badge').textContent = stale ? 'Bağlantı yok' : mode ? `${mode} · canlı` : 'Canlı';
 }
@@ -396,7 +509,7 @@ function renderFoot() {
   const { config } = derive();
   const foot = document.getElementById('foot');
   foot.replaceChildren(
-    h('span', {}, 'Audit: ', h('code', {}, config.auditFile ?? '—')),
+    h('span', {}, 'Olay kaydı: ', h('code', {}, config.auditFile ?? '—')),
     h('span', {}, 'Etiketler: ', h('code', {}, config.labelsFile ?? '—')),
     h('span', {}, `Son okuma: ${state.lastRead ? state.lastRead.toLocaleTimeString('tr-TR') : '—'}`),
   );
@@ -479,8 +592,8 @@ function signPanel(e, labels) {
       h('dt', {}, 'Karar'), h('dd', {}, pill(e))),
     h('div', { class: 'act' },
       detection ? [
-        h('button', { class: 'btn-sign ok', 'aria-pressed': review === 'true_positive', onclick: () => label(e, 'true_positive') }, review === 'true_positive' ? [icon('check', 16, 2.4), 'Doğrulandı'] : 'Doğru tespit'),
-        h('button', { class: 'btn-sign no', 'aria-pressed': review === 'false_positive', onclick: () => label(e, 'false_positive') }, review === 'false_positive' ? [icon('check', 16, 2.4), 'Yanlış alarm'] : 'Yanlış alarm'),
+        h('button', { class: 'btn-sign ok', 'aria-pressed': String(review === 'true_positive'), title: review === 'true_positive' ? 'Etiketi geri almak için tekrar tıkla' : null, onclick: () => label(e, 'true_positive') }, review === 'true_positive' ? [icon('check', 16, 2.4), 'Doğrulandı'] : 'Doğru tespit'),
+        h('button', { class: 'btn-sign no', 'aria-pressed': String(review === 'false_positive'), title: review === 'false_positive' ? 'Etiketi geri almak için tekrar tıkla' : null, onclick: () => label(e, 'false_positive') }, review === 'false_positive' ? [icon('check', 16, 2.4), 'Yanlış alarm'] : 'Yanlış alarm'),
       ] : null,
       h('button', { class: 'btn-sign no', onclick: () => openEvent(e) }, 'Ayrıntı', icon('arrowRight', 16, 2.2))));
 }
@@ -572,11 +685,11 @@ function mlCard({ config, ml, labels, events }) {
       h('span', { class: 'ml-name' }, config.ml?.model ?? '—'),
       h('span', { class: 'ml-big' }, String(ml.length), ' ', h('small', {}, 'tespit')),
       h('div', { class: 'ml-foot' },
-        h('span', {}, `eşik ${config.ml?.threshold ?? '—'} · fail ${config.ml?.failMode ?? '—'}`),
+        h('span', {}, `eşik ${config.ml?.threshold ?? '—'} · ${failText(config.ml?.failMode)}`),
         h('span', { class: 'ml-brand' }, 'ONNX'))),
     h('dl', { class: 'kv' },
-      h('dt', {}, 'DLP'), h('dd', {}, config.dlp?.enabled ? config.dlp.action : 'kapalı'),
-      h('dt', {}, 'Tool pinning'), h('dd', {}, config.pinning ? 'açık' : 'kapalı'),
+      h('dt', {}, 'Veri sızıntısı (DLP)'), h('dd', {}, config.dlp?.enabled ? DLP_ACTIONS[config.dlp.action] ?? config.dlp.action : 'kapalı'),
+      h('dt', {}, 'Araç sabitleme'), h('dd', {}, config.pinning ? 'açık' : 'kapalı'),
       h('dt', {}, 'Etiketlenen olay'), h('dd', {}, String(labeled)),
       h('dt', {}, 'Eğitime hazır örnek'), h('dd', {}, String(trainable))),
     h('span', { class: 'spacer' }),
@@ -705,7 +818,7 @@ function detailPane(e, labels) {
         : h('div', { class: 'd-card dashed' }, h('span', {}, 'Kural önerisi yok'))),
     h('div', { class: 'd-reason' },
       h('b', {}, 'Gerekçe'), h('div', {}, e.reason ?? '—'),
-      e.excerpt ? [h('div', { class: 'd-label', style: { marginTop: '10px' } }, 'Tetikleyen metin (yalnızca audit logunda, modele gönderilmez)'), h('pre', {}, e.excerpt)] : null),
+      e.excerpt ? [h('div', { class: 'd-label', style: { marginTop: '10px' } }, 'Tetikleyen metin (yalnızca olay kaydında, modele gönderilmez)'), h('pre', {}, e.excerpt)] : null),
     maskedBlock(e),
     h('div', { class: 'd-foot' },
       h('div', {}, h('span', { class: 'd-label' }, 'Zaman'), h('b', {}, fmtTime(e.ts))),
@@ -713,8 +826,8 @@ function detailPane(e, labels) {
       h('div', {}, h('span', { class: 'd-label' }, 'Eğitime uygun'), h('b', {}, e.excerpt ? 'Evet' : 'Hayır')),
       detection
         ? h('div', { class: 'd-actions' },
-          h('button', { class: 'btn-ghost', 'aria-pressed': review === 'false_positive', onclick: () => label(e, 'false_positive') }, icon(review === 'false_positive' ? 'check' : 'x', 14, 2.2), 'Yanlış pozitif'),
-          h('button', { class: 'btn-white-pill', 'aria-pressed': review === 'true_positive', onclick: () => label(e, 'true_positive') }, icon('check', 14, 2.4), review === 'true_positive' ? 'Doğrulandı' : 'Doğru tespit'))
+          h('button', { class: 'btn-ghost', 'aria-pressed': String(review === 'false_positive'), title: review === 'false_positive' ? 'Etiketi geri almak için tekrar tıkla' : null, onclick: () => label(e, 'false_positive') }, icon(review === 'false_positive' ? 'check' : 'x', 14, 2.2), 'Yanlış pozitif'),
+          h('button', { class: 'btn-white-pill', 'aria-pressed': String(review === 'true_positive'), title: review === 'true_positive' ? 'Etiketi geri almak için tekrar tıkla' : null, onclick: () => label(e, 'true_positive') }, icon('check', 14, 2.4), review === 'true_positive' ? 'Doğrulandı' : 'Doğru tespit'))
         : null));
 }
 
@@ -848,7 +961,7 @@ function renderMl() {
       h('div', {},
         h('h2', { class: 'ev-title' }, 'ML olayları'),
         h('div', { class: 'ev-sub' }, config.ml?.model
-          ? `Model ${config.ml.model} · eşik ${threshold} · fail ${config.ml.failMode ?? '—'}${config.ml.enabled ? '' : ' · politikada kapalı'}`
+          ? `Model ${config.ml.model} · eşik ${threshold} · ${failText(config.ml.failMode)}${config.ml.enabled ? '' : ' · politikada kapalı'}`
           : 'ML katmanı yapılandırılmamış. Politikada ml.enabled: true ile etkinleştir.')),
       h('span', { class: 'spacer' }),
       labelsLink('btn-blue', d)),

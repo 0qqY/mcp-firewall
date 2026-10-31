@@ -69,6 +69,14 @@ test('labels with model-visible text become training rows', async () => {
   assert.equal(readFileSync(labelsFile, 'utf8').trim().split('\n').length, 2);
 });
 
+test('a label can be withdrawn and then given again', async () => {
+  assert.equal((await post({ eventId: 1, review: 'none' })).status, 200);
+  assert.equal((await (await fetch(`${base}/api/events`)).json()).labels[1], undefined);
+  assert.equal((await (await fetch(`${base}/api/labels.jsonl`)).text()).trim(), '');
+  await post({ eventId: 1, review: 'true_positive' });
+  assert.equal((await (await fetch(`${base}/api/events`)).json()).labels[1], 'true_positive');
+});
+
 test('only whitelisted static files are served, with a CSP', async () => {
   const page = await fetch(`${base}/`);
   assert.match(page.headers.get('content-security-policy') ?? '', /default-src 'self'/);
