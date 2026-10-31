@@ -70,6 +70,8 @@ const state = {
   tab: 'detections',
   category: '',
   q: '',
+  /** Event list time window in ms (the overview's 24-hour counts open with one); null = all time. */
+  since: null,
   overviewId: null,
   radarMode: 'list',
   threshold: null,
@@ -142,13 +144,66 @@ function toast(text) {
   toast.timer = setTimeout(() => (el.hidden = true), 2600);
 }
 
-async function copy(text, message) {
+/** Clipboard API first, then the older execCommand path (some embedded browsers deny the API). */
+async function writeClipboard(text) {
   try {
     await navigator.clipboard.writeText(text);
-    toast(message);
-  } catch {
-    toast('Panoya kopyalanamadı');
-  }
+    return true;
+  } catch { /* permission denied or no focus */ }
+  const area = h('textarea', { readonly: true, 'aria-hidden': 'true', class: 'copy-buffer' }, text);
+  document.body.append(area);
+  area.select();
+  const ok = document.execCommand('copy');
+  area.remove();
+  return ok;
+}
+
+/** Copies `text`; when the browser refuses, shows it so it can be copied by hand. */
+async function copy(text, message) {
+  if (await writeClipboard(text)) return toast(message);
+  textDialog('Panoya kopyalanamadı', 'Tarayıcı panoya yazmaya izin vermedi. Metin seçili, Ctrl+C ile kopyala.', text, message);
+}
+
+/** Modal with a read-only block of text and a copy button. */
+function textDialog(title, note, text, copied = 'Panoya kopyalandı') {
+  document.getElementById('text-dialog')?.remove();
+  // Removed on close directly too: the `close` event (Escape) can arrive late in a background tab.
+  const close = () => { if (dialog.open) dialog.close(); dialog.remove(); };
+  const pre = h('pre', { tabindex: '0' }, text);
+  const status = () => dialog.querySelector('.text-dialog-status');
+  const dialog = h('dialog', { id: 'text-dialog', class: 'text-dialog', 'aria-labelledby': 'text-dialog-title', onclose: close },
+    h('h2', { id: 'text-dialog-title' }, title),
+    note ? h('p', {}, note) : null,
+    pre,
+    h('p', { class: 'text-dialog-status', role: 'status' }),
+    h('div', { class: 'text-dialog-act' },
+      h('button', { class: 'btn-ghost-dark', onclick: close }, 'Kapat'),
+      h('button', { class: 'btn-dark', onclick: async () => {
+        if (await writeClipboard(text)) { close(); return toast(copied); }
+        getSelection().selectAllChildren(pre);
+        status().textContent = 'Tarayıcı panoya izin vermedi: metin seçili, Ctrl+C ile kopyala.';
+      } }, icon('copy', 14), 'Kopyala')));
+  dialog.addEventListener('click', (ev) => { if (ev.target === dialog) close(); });
+  document.body.append(dialog);
+  dialog.showModal();
+  getSelection().selectAllChildren(pre);
+}
+
+/** Training-row count: labelled events that carried text. Only those rows end up in the download. */
+const trainableCount = ({ events, labels }) => events.filter((e) => labels[e.id] && e.excerpt).length;
+
+/** The labels download, which explains itself instead of saving an empty file when nothing is labelled yet. */
+function labelsLink(cls, d, text = 'Etiketleri indir') {
+  const n = trainableCount(d);
+  return h('a', {
+    class: cls, href: '/api/labels.jsonl', download: 'mcp-firewall-labels.jsonl', style: { textDecoration: 'none' },
+    title: n ? `${n} eğitim satırı` : 'Henüz eğitime uygun etiket yok',
+    onclick: (ev) => {
+      if (n) return;
+      ev.preventDefault();
+      toast('İndirilecek etiket yok: önce metni olan bir tespiti Doğru tespit ya da Yanlış alarm olarak işaretle');
+    },
+  }, icon('download', 14), `${text} (${n})`);
 }
 
 const MARKER = /(\[REDACTED:[^\]]+\])/;
@@ -294,7 +349,7 @@ async function label(e, review) {
 }
 
 function setView(view, extra = {}) {
-  Object.assign(state, { view }, extra);
+  Object.assign(state, { view, since: null }, extra);
   storage('view', view);
   render();
   window.scrollTo({ top: 0 });
@@ -351,14 +406,15 @@ function renderFoot() {
 
 function statsRow({ events }) {
   const day = events.filter((e) => ago(e.ts) < DAY);
-  const count = (...v) => day.filter((e) => v.includes(e.verdict)).length;
+  // Same verdict sets as the event tabs these counts open, so the number matches the list.
+  const count = (set) => day.filter((e) => set.has(e.verdict)).length;
   const stat = (cls, n, text, note, onclick) => h('button', { class: 'stat', onclick },
     h('span', { class: `badge-n ${cls}` }, String(n)), h('p', {}, text, h('small', {}, note)));
-  const openTab = (tab) => () => setView('events', { tab, selectedId: null, category: '', q: '' });
+  const openTab = (tab) => () => setView('events', { tab, selectedId: null, category: '', q: '', since: DAY });
   return h('div', { class: 'wrap' }, h('section', { class: 'stats', 'aria-label': 'Özet sayılar' },
-    stat('blk', count('block'), 'Engellenen', 'son 24 saat', openTab('blocked')),
-    stat('msk', count('redact'), 'Maskelenen', 'son 24 saat', openTab('masked')),
-    stat('ok', count('allow'), 'İzin verilen', 'loglananlar, 24 saat', openTab('allowed')),
+    stat('blk', count(BLOCKS), 'Engellenen', 'son 24 saat', openTab('blocked')),
+    stat('msk', count(MASKS), 'Maskelenen', 'son 24 saat', openTab('masked')),
+    stat('ok', count(new Set(['allow'])), 'İzin verilen', 'loglananlar, 24 saat', openTab('allowed')),
     stat('ink', (state.data?.servers ?? []).length, 'Sunucu', 'filtrelemek için seç', pickServer)));
 }
 
@@ -505,7 +561,7 @@ function quickCard({ config, ml }) {
 
 function mlCard({ config, ml, labels, events }) {
   const labeled = Object.keys(labels).length;
-  const trainable = events.filter((e) => labels[e.id] && e.excerpt).length;
+  const trainable = trainableCount({ events, labels });
   const on = config.ml?.enabled;
   return h('article', { class: 'card' },
     h('div', { class: 'card-head' },
@@ -524,7 +580,7 @@ function mlCard({ config, ml, labels, events }) {
       h('dt', {}, 'Etiketlenen olay'), h('dd', {}, String(labeled)),
       h('dt', {}, 'Eğitime hazır örnek'), h('dd', {}, String(trainable))),
     h('span', { class: 'spacer' }),
-    h('a', { class: 'btn-dark btn-block', href: '/api/labels.jsonl', download: 'mcp-firewall-labels.jsonl', style: { textDecoration: 'none' } }, icon('download', 14), 'Etiketleri indir (.jsonl)'));
+    labelsLink('btn-dark btn-block', { events, labels }));
 }
 
 function promoCard({ pending }) {
@@ -557,10 +613,12 @@ function renderOverview() {
 
 // ---------- event center ----------
 
+const inWindow = (e) => !state.since || ago(e.ts) < state.since;
+
 function filtered({ events }) {
   const q = state.q.trim().toLowerCase();
   return events
-    .filter((e) => e.verdict !== 'info')
+    .filter((e) => e.verdict !== 'info' && inWindow(e))
     .filter((e) => {
       if (state.tab === 'detections') return DETECTIONS.has(e.verdict);
       if (state.tab === 'blocked') return BLOCKS.has(e.verdict);
@@ -643,7 +701,7 @@ function detailPane(e, labels) {
       h('div', { class: 'd-card' }, h('b', {}, e.direction === 'client->server' ? 'İstemci → Sunucu' : e.direction ? 'Sunucu → İstemci' : '—'), h('span', {}, 'Yön')),
       h('div', { class: 'd-card' }, h('b', {}, typeof e.score === 'number' ? e.score.toFixed(3) : '—'), h('span', {}, 'ML skoru')),
       ruleYaml
-        ? h('button', { class: 'd-card dashed', onclick: () => copy(ruleYaml, 'Kural YAML olarak kopyalandı') }, h('span', { style: { color: '#fff' } }, icon('plus', 18)), h('span', {}, 'Kural öner'))
+        ? h('button', { class: 'd-card dashed', onclick: () => textDialog('Kural önerisi', `${e.tool} aracını engelleyen kural. Politika dosyandaki tools.rules listesine ekle.`, ruleYaml, 'Kural YAML olarak kopyalandı') }, h('span', { style: { color: '#fff' } }, icon('plus', 18)), h('span', {}, 'Kural öner'))
         : h('div', { class: 'd-card dashed' }, h('span', {}, 'Kural önerisi yok'))),
     h('div', { class: 'd-reason' },
       h('b', {}, 'Gerekçe'), h('div', {}, e.reason ?? '—'),
@@ -666,9 +724,9 @@ function renderEvents() {
   const list = filtered(d);
   if (!list.some((e) => e.id === state.selectedId)) state.selectedId = list[0]?.id ?? null;
   const selected = list.find((e) => e.id === state.selectedId);
-  const base = d.events.filter((e) => e.verdict !== 'info');
+  const base = d.events.filter((e) => e.verdict !== 'info' && inWindow(e));
   const counts = {
-    detections: d.detections.length,
+    detections: base.filter((e) => DETECTIONS.has(e.verdict)).length,
     all: base.length,
     blocked: base.filter((e) => BLOCKS.has(e.verdict)).length,
     masked: base.filter((e) => MASKS.has(e.verdict)).length,
@@ -676,7 +734,7 @@ function renderEvents() {
     warn: base.filter((e) => ['warn', 'would_block', 'would_redact'].includes(e.verdict)).length,
   };
   const tabs = EVENT_TABS;
-  const activeFilters = [state.category, state.q.trim(), state.server].filter(Boolean).length;
+  const activeFilters = [state.category, state.q.trim(), state.server, state.since].filter(Boolean).length;
 
   const search = h('input', { type: 'search', placeholder: 'Araç, sunucu veya gerekçe ara…', value: state.q, 'aria-label': 'Olay ara' });
   search.addEventListener('input', () => { state.q = search.value; renderEventsKeepFocus(); });
@@ -686,7 +744,7 @@ function renderEvents() {
       h('button', { class: 'back', 'aria-label': 'Genel bakışa dön', onclick: () => setView('overview') }, icon('arrowLeft', 16)),
       h('div', {}, h('h2', { class: 'ev-title' }, 'Olaylar'), h('div', { class: 'ev-sub' }, 'Firewall kararlarını izle, incele ve model eğitimi için etiketle.')),
       h('span', { class: 'spacer' }),
-      h('a', { class: 'btn-blue', href: '/api/labels.jsonl', download: 'mcp-firewall-labels.jsonl', style: { textDecoration: 'none' } }, icon('download', 14), 'Etiketleri indir')),
+      labelsLink('btn-blue', d)),
     kpis(d),
     h('div', { class: 'filters' },
       h('span', { class: 'lbl' }, 'Aktif filtreler', h('span', { class: 'count' }, String(activeFilters))),
@@ -694,6 +752,9 @@ function renderEvents() {
         h('select', { 'aria-label': 'Kategori', onchange: (ev) => { state.category = ev.target.value; render(); } },
           h('option', { value: '' }, 'Tüm kategoriler'),
           Object.entries(CATEGORIES).map(([k, c]) => h('option', { value: k, selected: state.category === k }, c.label)))),
+      state.since
+        ? h('button', { class: 'filter-chip', 'aria-label': 'Son 24 saat filtresini kaldır', onclick: () => { state.since = null; state.selectedId = null; render(); } }, 'Son 24 saat', icon('x', 14, 2.4))
+        : null,
       h('div', { class: 'seg' }, tabs.map(([k, text]) =>
         h('button', { class: state.tab === k ? 'active' : '', onclick: () => { state.tab = k; state.selectedId = null; render(); } }, `${text} ${counts[k]}`))),
       h('label', { class: 'search' }, icon('search', 14), search)),
@@ -790,7 +851,7 @@ function renderMl() {
           ? `Model ${config.ml.model} · eşik ${threshold} · fail ${config.ml.failMode ?? '—'}${config.ml.enabled ? '' : ' · politikada kapalı'}`
           : 'ML katmanı yapılandırılmamış. Politikada ml.enabled: true ile etkinleştir.')),
       h('span', { class: 'spacer' }),
-      h('a', { class: 'btn-blue', href: '/api/labels.jsonl', download: 'mcp-firewall-labels.jsonl', style: { textDecoration: 'none' } }, icon('download', 14), 'Etiketleri indir')),
+      labelsLink('btn-blue', d)),
     h('div', { class: 'kpis' },
       stat('ML tespiti', 'cpu', 'var(--blue)', String(ml.length), 'eşiği geçen ve loglanan skorlar'),
       stat('Ortalama skor', 'activity', 'var(--ink)', avg === null ? '—' : avg.toFixed(3), `eşik ${threshold}`),

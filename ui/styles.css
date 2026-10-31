@@ -225,6 +225,8 @@ svg { display: block; }
 .kpi .k-viz { margin-top: 10px; height: 46px; }
 .filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .filters .lbl { font-size: 16px; font-weight: 800; display: inline-flex; align-items: center; gap: 8px; }
+.filter-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px 0 14px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 14px; font-weight: 700; }
+.filter-chip:hover { background: #26374a; }
 .filters .count { background: var(--ink); color: #fff; border-radius: 6px; min-width: 24px; height: 24px; display: inline-grid; place-items: center; font-size: 13px; }
 .search { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 999px; min-height: 44px; padding: 0 16px; margin-left: auto; }
 .search input { border: 0; outline: 0; background: transparent; font-size: 16px; width: 240px; }
@@ -293,6 +295,16 @@ mark.redacted::before { content: "◆ "; }
 .detail .empty b { color: #fff; }
 .foot { padding-top: 8px; padding-bottom: 28px; font-size: 13px; color: var(--muted); display: flex; gap: 8px 20px; flex-wrap: wrap; }
 .foot code { font: 13px var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
+.copy-buffer { position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; }
+.text-dialog { border: 0; border-radius: 20px; padding: 24px; width: min(560px, calc(100vw - 32px)); background: #fff; color: var(--ink); }
+.text-dialog::backdrop { background: rgba(20, 32, 43, .45); }
+.text-dialog h2 { font-size: 20px; margin: 0 0 6px; }
+.text-dialog p { color: var(--ink-2); font-size: 15px; margin: 0 0 14px; }
+.text-dialog pre { background: var(--bg); border-radius: 12px; padding: 14px 16px; font: 14px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; margin: 0; max-height: 50vh; overflow: auto; }
+.text-dialog .text-dialog-status { margin: 10px 0 0; font-weight: 700; color: var(--warn); }
+.text-dialog .text-dialog-status:empty { display: none; }
+.text-dialog-act { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.btn-ghost-dark { background: none; border: 2px solid var(--line); color: var(--ink); border-radius: 999px; padding: 9px 18px; font-weight: 700; }
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 12px 20px; border-radius: 999px; font-size: 15px; font-weight: 700; z-index: 20; max-width: calc(100vw - 32px); }
 
 /* The route column gets narrow long before the page does: stack reason under the tool name. */

@@ -332,7 +332,8 @@ node dist/src/cli.js dashboard --policy policy.yaml
 
 Audit metni saldırgan kontrolündedir, bu yüzden panel yalnızca `127.0.0.1`'e bağlanır, yabancı
 `Host`/`Origin` başlıklarını reddeder (DNS rebinding, CSRF), sıkı CSP ile çalışır ve veriyi DOM'a
-yalnızca `textContent` ile yazar. Arayüzü örnek veriyle denemek için:
+yalnızca `textContent` ile yazar. Arayüzü örnek veriyle denemek için (betik, metni olan tespitlerin yaklaşık
+yarısını etiketleyip `mcp-firewall-labels.jsonl` dosyasını da aynı klasöre yazar):
 
 ```bash
 node scripts/demo-audit.mjs demo/audit.jsonl
