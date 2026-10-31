@@ -10,6 +10,7 @@ const STATIC: Record<string, [file: string, type: string]> = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/styles.css': ['styles.css', 'text/css; charset=utf-8'],
+  '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
 };
 const MAX_EVENTS = 5000;
 const MAX_BODY = 4096;

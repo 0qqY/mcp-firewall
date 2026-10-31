@@ -57,7 +57,8 @@ const THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95];
 const DAY = 86400e3;
 
 const VIEWS = { overview: 'Genel bakış', events: 'Olaylar', ml: 'ML olayları' };
-const EVENT_TABS = [['detections', 'Tespitler'], ['blocked', 'Engellenen'], ['warn', 'Uyarılar'], ['all', 'Tümü']];
+const EVENT_TABS = [['detections', 'Tespitler'], ['blocked', 'Engellenen'], ['masked', 'Maskelenen'], ['warn', 'Uyarılar'], ['allowed', 'İzin'], ['all', 'Tümü']];
+const MASKS = new Set(['redact', 'would_redact']);
 
 const state = {
   view: VIEWS[storage('view')] ? storage('view') : 'overview',
@@ -325,12 +326,20 @@ function renderFoot() {
 function statsRow({ events }) {
   const day = events.filter((e) => ago(e.ts) < DAY);
   const count = (...v) => day.filter((e) => v.includes(e.verdict)).length;
-  const stat = (cls, n, text, note) => h('div', { class: 'stat' }, h('span', { class: `badge-n ${cls}` }, String(n)), h('p', {}, text, h('small', {}, note)));
+  const stat = (cls, n, text, note, onclick) => h('button', { class: 'stat', onclick },
+    h('span', { class: `badge-n ${cls}` }, String(n)), h('p', {}, text, h('small', {}, note)));
+  const openTab = (tab) => () => setView('events', { tab, selectedId: null, category: '', q: '' });
   return h('div', { class: 'wrap' }, h('section', { class: 'stats', 'aria-label': 'Özet sayılar' },
-    stat('blk', count('block'), 'Engellenen', 'son 24 saat'),
-    stat('msk', count('redact'), 'Maskelenen', 'son 24 saat'),
-    stat('ok', count('allow'), 'İzin verilen', 'loglananlar, 24 saat'),
-    stat('ink', (state.data?.servers ?? []).length, 'Sunucu', 'audit logunda')));
+    stat('blk', count('block'), 'Engellenen', 'son 24 saat', openTab('blocked')),
+    stat('msk', count('redact'), 'Maskelenen', 'son 24 saat', openTab('masked')),
+    stat('ok', count('allow'), 'İzin verilen', 'loglananlar, 24 saat', openTab('allowed')),
+    stat('ink', (state.data?.servers ?? []).length, 'Sunucu', 'filtrelemek için seç', pickServer)));
+}
+
+function pickServer() {
+  const select = document.getElementById('server-filter');
+  select.focus();
+  try { select.showPicker(); } catch { /* older browsers: focus is enough */ }
 }
 
 /** Hourly detections as stations on a line: the station grows with the count. */
@@ -528,6 +537,8 @@ function filtered({ events }) {
     .filter((e) => {
       if (state.tab === 'detections') return DETECTIONS.has(e.verdict);
       if (state.tab === 'blocked') return BLOCKS.has(e.verdict);
+      if (state.tab === 'masked') return MASKS.has(e.verdict);
+      if (state.tab === 'allowed') return e.verdict === 'allow';
       if (state.tab === 'warn') return e.verdict === 'warn' || e.verdict === 'would_block' || e.verdict === 'would_redact';
       return true;
     })
@@ -632,6 +643,8 @@ function renderEvents() {
     detections: d.detections.length,
     all: base.length,
     blocked: base.filter((e) => BLOCKS.has(e.verdict)).length,
+    masked: base.filter((e) => MASKS.has(e.verdict)).length,
+    allowed: base.filter((e) => e.verdict === 'allow').length,
     warn: base.filter((e) => ['warn', 'would_block', 'would_redact'].includes(e.verdict)).length,
   };
   const tabs = EVENT_TABS;
