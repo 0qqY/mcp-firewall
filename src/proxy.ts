@@ -677,12 +677,13 @@ export class FirewallProxy {
     const scan = deepScan(value, detectors);
     if (scan.findings.length === 0) return this.encodedDlp(value, ctx, what);
     const reason = `sensitive data in ${what}: ${formatFindings(scan.findings)}`;
-    if (action === 'block') return { value, blockReason: this.violation(ctx, reason) ? reason : undefined, found: true };
+    const event = { ...ctx, masked: scan.masked };
+    if (action === 'block') return { value, blockReason: this.violation(event, reason) ? reason : undefined, found: true };
     if (action === 'warn') {
-      this.audit.record({ ...ctx, verdict: 'warn', reason });
+      this.audit.record({ ...event, verdict: 'warn', reason });
       return { value, found: true };
     }
-    this.audit.record({ ...ctx, verdict: this.enforcing ? 'redact' : 'would_redact', reason });
+    this.audit.record({ ...event, verdict: this.enforcing ? 'redact' : 'would_redact', reason });
     return { value: this.enforcing ? scan.value : value, found: true };
   }
 

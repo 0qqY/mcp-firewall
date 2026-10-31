@@ -13,6 +13,24 @@ export interface Finding {
   count: number;
 }
 
+/**
+ * Where one secret was masked, for the analyst. Never the secret itself: `hint` is at most its last four
+ * characters and `context` is the surrounding text taken from the already-redacted copy.
+ */
+export interface Masked {
+  detector: string;
+  /** JSON path inside the scanned value, e.g. `content[0].text`; empty for a bare string. */
+  where: string;
+  hint?: string;
+  context: string;
+}
+
+/** Masked entries kept per scan, and characters of redacted text shown on each side of a placeholder. */
+const MAX_MASKED = 10;
+const CONTEXT_CHARS = 60;
+/** Detectors whose tail is boilerplate or whose value is short enough that four characters say too much. */
+const NO_HINT = new Set(['private_key', 'jwt']);
+
 function luhn(candidate: string): boolean {
   const digits = candidate.replace(/\D/g, '');
   if (digits.length < 13 || digits.length > 19) return false;
@@ -79,33 +97,49 @@ const redactionPlaceholder = (name: string): string => `[REDACTED:${name}]`;
  */
 export const REDACTION_MARKER = /\[REDACTED:[^\]]+\]/g;
 
-function scanText(text: string, detectors: Detector[], counts: Map<string, number>): string {
+function scanText(text: string, detectors: Detector[], counts: Map<string, number>, where: string, masked: Masked[]): string {
   let out = text;
+  const hints = new Map<string, (string | undefined)[]>();
   for (const d of detectors) {
     out = out.replace(d.regex, (match) => {
       if (d.validate && !d.validate(match)) return match;
       counts.set(d.name, (counts.get(d.name) ?? 0) + 1);
+      const tail = match.replace(/\s+/g, '');
+      hints.set(d.name, [...(hints.get(d.name) ?? []), NO_HINT.has(d.name) || tail.length < 12 ? undefined : tail.slice(-4)]);
       return redactionPlaceholder(d.name);
     });
+  }
+  // Context comes from `out` only after every detector ran, so it can never hold a secret another detector masks.
+  for (const [name, list] of hints) {
+    const marker = redactionPlaceholder(name);
+    let at = -1;
+    for (const hint of list) {
+      at = out.indexOf(marker, at + 1);
+      if (masked.length >= MAX_MASKED || at < 0) break;
+      const from = Math.max(0, at - CONTEXT_CHARS), to = Math.min(out.length, at + marker.length + CONTEXT_CHARS);
+      const context = `${from > 0 ? '…' : ''}${out.slice(from, to).replace(/\s+/g, ' ')}${to < out.length ? '…' : ''}`;
+      masked.push({ detector: name, where, ...(hint ? { hint } : {}), context });
+    }
   }
   return out;
 }
 
 /** Scans every string in a JSON value and returns a redacted copy plus what was found. */
-export function deepScan(value: unknown, detectors: Detector[]): { value: unknown; findings: Finding[] } {
+export function deepScan(value: unknown, detectors: Detector[]): { value: unknown; findings: Finding[]; masked: Masked[] } {
   const counts = new Map<string, number>();
-  const walk = (v: unknown): unknown => {
-    if (typeof v === 'string') return scanText(v, detectors, counts);
-    if (Array.isArray(v)) return v.map(walk);
+  const masked: Masked[] = [];
+  const walk = (v: unknown, path: string): unknown => {
+    if (typeof v === 'string') return scanText(v, detectors, counts, path, masked);
+    if (Array.isArray(v)) return v.map((x, i) => walk(x, `${path}[${i}]`));
     if (isObject(v)) {
       // Base64 image/audio payloads only produce false positives.
       if ((v.type === 'image' || v.type === 'audio') && typeof v.data === 'string') return v;
-      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, path ? `${path}.${k}` : k)]));
     }
     return v;
   };
-  const out = walk(value);
-  return { value: out, findings: [...counts].map(([detector, count]) => ({ detector, count })) };
+  const out = walk(value, '');
+  return { value: out, findings: [...counts].map(([detector, count]) => ({ detector, count })), masked };
 }
 
 export const formatFindings = (findings: Finding[]): string =>

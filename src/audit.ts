@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { AuditSink, SiemRecord } from './siem.js';
+import type { Masked } from './dlp.js';
 
 export type Verdict = 'allow' | 'block' | 'would_block' | 'redact' | 'would_redact' | 'warn' | 'info';
 
@@ -14,6 +15,8 @@ export interface AuditEvent {
   score?: number;
   /** Text that triggered the model. Logged for analysts, never echoed back to the model. */
   excerpt?: string;
+  /** What DLP masked and where; holds no secret, see `Masked`. */
+  masked?: Masked[];
 }
 
 /** What goes to the SIEM sinks besides the JSONL file. */
@@ -48,7 +51,10 @@ export class AuditLog {
     if (!toFile && !toSinks) return;
     const record: SiemRecord = { ts: new Date().toISOString(), server: this.server, ...event };
     if (toSinks) {
-      const out = this.forward.excerpt ? record : { ...record, excerpt: undefined };
+      // `context` is tool text like `excerpt`, so it follows the same switch; detector, path and hint always go.
+      const out = this.forward.excerpt
+        ? record
+        : { ...record, excerpt: undefined, masked: record.masked?.map(({ context: _, ...m }) => m) };
       for (const sink of this.forward.sinks) sink.send(out);
     }
     if (!toFile) return;

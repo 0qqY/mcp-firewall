@@ -292,7 +292,7 @@ audit:
       headers:
         Authorization: "Bearer ${OTEL_TOKEN}"   # ortam değişkeninden; tanımsızsa firewall başlamaz
     logAllowed: false     # allow kayıtlarını da gönder (her MCP mesajı bir kayıt: yüksek hacim)
-    excerpt: false        # ML'yi tetikleyen metni de gönder (güvenilmeyen, özel olabilecek içerik)
+    excerpt: false        # ML'yi tetikleyen metni ve DLP'nin maskelenmiş çevre metnini de gönder (özel olabilecek içerik)
     queueLimit: 1000      # alıcıya ulaşılamazken bekletilen kayıt sayısı; fazlası en eskiden düşer
 ```
 
@@ -321,11 +321,14 @@ node dist/src/cli.js dashboard --policy policy.yaml
 
 `http://127.0.0.1:4747` adresinde audit logunu canlı (5 sn) gösteren yerel bir panel açar:
 
-- **Genel Bakış:** son tespitler, kategori radarı (son 24 saat ve günlük ortalama), tespit trendi,
-  ML eşiği simülasyonu, ML katmanı durumu.
-- **Olay Merkezi:** KPI'lar, filtreler, olay listesi ve detay paneli. Her tespit "Doğru tespit" ya da
+- **Genel bakış:** son 24 saatin sayıları (tıklayınca ilgili olay listesi açılır), saatlik tespitler,
+  son olaylar ve seçili olayın detayı, kategori dağılımı, ML eşiği simülasyonu, ML katmanı durumu.
+- **Olaylar:** KPI'lar, filtreler, olay listesi ve detay paneli. Her tespit "Doğru tespit" ya da
   "Yanlış pozitif" olarak etiketlenir; tetikleyen metni olan etiketler eğitim verisine dönüşür
   (`Etiketleri indir` → `prepare_data.py --extra-train mcp-firewall-labels.jsonl`).
+- **Maskelenen veri:** DLP kaydı (`masked`) sırrın kendisini hiçbir zaman tutmaz; detayda dedektör, JSON
+  konumu (`content[0].text`), son 4 karakter ve maskelenmiş kopyadan alınan çevre metni görünür (en fazla 10
+  bulgu). Özel anahtar ve JWT için son karakterler de gösterilmez.
 
 Audit metni saldırgan kontrolündedir, bu yüzden panel yalnızca `127.0.0.1`'e bağlanır, yabancı
 `Host`/`Origin` başlıklarını reddeder (DNS rebinding, CSRF), sıkı CSP ile çalışır ve veriyi DOM'a

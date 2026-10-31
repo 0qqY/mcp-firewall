@@ -259,6 +259,16 @@ button.d-card.dashed:hover { background: rgba(255, 255, 255, .08); }
 .d-reason { font-size: 16px; line-height: 1.5; }
 .d-reason > b { display: block; font-size: 14px; color: var(--on-ink); font-weight: 600; margin-bottom: 4px; }
 .d-reason pre { margin: 6px 0 0; padding: 14px 16px; border-radius: 10px; background: #fff; color: var(--ink); font: 14px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
+.masked { display: grid; gap: 10px; }
+.masked-h { font-size: 14px; color: var(--on-ink); font-weight: 600; }
+.masked-row { background: #fff; color: var(--ink); border-radius: 10px; padding: 12px 14px; display: grid; gap: 8px; min-width: 0; }
+.masked-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: 14px; color: var(--ink-2); }
+.masked-top b { font-size: 16px; color: var(--ink); font-family: var(--mono); }
+.masked-top .hint { font-family: var(--mono); font-weight: 700; color: var(--ink); }
+.masked-ctx { font: 14px/1.6 var(--mono); overflow-wrap: anywhere; }
+mark.redacted { background: var(--amber); color: var(--ink); font-weight: 700; padding: 1px 6px; border-radius: 3px; }
+mark.redacted::before { content: "◆ "; }
+.masked-note { font-size: 13px; color: var(--on-ink); }
 .d-foot { margin-top: auto; display: flex; align-items: flex-end; gap: 28px; flex-wrap: wrap; }
 .d-foot .d-label { display: block; }
 .d-foot b { font-size: 16px; }

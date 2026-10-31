@@ -151,6 +151,32 @@ async function copy(text, message) {
   }
 }
 
+const MARKER = /(\[REDACTED:[^\]]+\])/;
+
+/** Context text with each `[REDACTED:…]` placeholder drawn as a masked block. */
+function redactedText(text) {
+  return text.split(MARKER).map((part, i) => (i % 2 ? h('mark', { class: 'redacted' }, part.slice(10, -1)) : part));
+}
+
+/** What DLP masked and where. The audit log never holds the secret, only its type, path and last characters. */
+function maskedBlock(e) {
+  if (!MASKS.has(e.verdict) && e.category !== 'dlp') return null;
+  if (!e.masked?.length) {
+    return h('div', { class: 'masked' },
+      h('div', { class: 'masked-h' }, 'Maskelenen veri'),
+      h('p', { class: 'masked-note' }, 'Bu kayıtta yalnızca türü ve sayısı var (eski sürümde yazılmış). Yeni kayıtlarda yeri ve çevresindeki metin de görünür.'));
+  }
+  return h('div', { class: 'masked' },
+    h('div', { class: 'masked-h' }, `Maskelenen veri · ${e.masked.length}`),
+    e.masked.map((m) => h('div', { class: 'masked-row' },
+      h('div', { class: 'masked-top' },
+        h('b', {}, m.detector),
+        h('span', {}, m.where ? `konum: ${m.where}` : 'konum: metin'),
+        m.hint ? h('span', { class: 'hint' }, `…${m.hint}`) : null),
+      m.context ? h('div', { class: 'masked-ctx' }, redactedText(m.context)) : null)),
+    h('p', { class: 'masked-note' }, 'Sırrın kendisi hiçbir yere kaydedilmez; yalnızca son 4 karakteri gösterilir.'));
+}
+
 function tile(e, size = 34) {
   const c = cat(e);
   return h('span', { class: 'tile', style: { background: c.bg, color: c.fg, width: `${size}px`, height: `${size}px` } }, icon(c.icon, 16));
@@ -388,6 +414,7 @@ function signPanel(e, labels) {
     h('h2', { class: 'name', id: 'secili-olay' }, 'Seçili olay'),
     h('h3', {}, typeof e.score === 'number' ? `${cat(e).label}, ML skoru ${e.score.toFixed(3)}` : cat(e).label),
     e.excerpt ? h('div', {}, h('p', { class: 'q-l' }, 'Tetikleyen metin'), h('blockquote', { class: 'q' }, e.excerpt)) : null,
+    maskedBlock(e),
     h('dl', { class: 'meta' },
       h('dt', {}, 'Araç'), h('dd', {}, subject(e)),
       h('dt', {}, 'Sunucu'), h('dd', {}, e.server ?? '—'),
@@ -621,6 +648,7 @@ function detailPane(e, labels) {
     h('div', { class: 'd-reason' },
       h('b', {}, 'Gerekçe'), h('div', {}, e.reason ?? '—'),
       e.excerpt ? [h('div', { class: 'd-label', style: { marginTop: '10px' } }, 'Tetikleyen metin (yalnızca audit logunda, modele gönderilmez)'), h('pre', {}, e.excerpt)] : null),
+    maskedBlock(e),
     h('div', { class: 'd-foot' },
       h('div', {}, h('span', { class: 'd-label' }, 'Zaman'), h('b', {}, fmtTime(e.ts))),
       h('div', {}, h('span', { class: 'd-label' }, 'Doğrulama'), h('b', {}, review === 'true_positive' ? 'Doğru tespit' : review === 'false_positive' ? 'Yanlış pozitif' : detection ? 'Bekliyor' : '—')),

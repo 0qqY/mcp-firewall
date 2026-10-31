@@ -319,3 +319,13 @@ test('AuditLog: sinks get findings, not allows or ML excerpts, unless asked; the
   verbose.record({ verdict: 'block', excerpt: 'x' });
   assert.deepEqual(all.map((r) => [r.verdict, r.excerpt]), [['allow', undefined], ['block', 'x']]);
 });
+
+test('AuditLog: DLP context follows the excerpt switch; detector, path and hint always reach the sink', () => {
+  const sent: SiemRecord[] = [];
+  const sink = { send: (r: SiemRecord) => sent.push(r), flush: async () => {}, close: () => {} };
+  const masked = [{ detector: 'aws_access_key', where: 'content[0].text', hint: 'MPLE', context: 'aws=[REDACTED:aws_access_key]' }];
+  new AuditLog(undefined, false, 'srv', null, { sinks: [sink], logAllowed: false, excerpt: false }).record({ verdict: 'redact', masked });
+  new AuditLog(undefined, false, 'srv', null, { sinks: [sink], logAllowed: false, excerpt: true }).record({ verdict: 'redact', masked });
+  assert.deepEqual(sent[0].masked, [{ detector: 'aws_access_key', where: 'content[0].text', hint: 'MPLE' }]);
+  assert.deepEqual(sent[1].masked, masked);
+});

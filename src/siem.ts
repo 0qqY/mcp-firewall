@@ -16,6 +16,8 @@ export interface SiemRecord {
   reason?: string;
   score?: number;
   excerpt?: string;
+  /** DLP findings with path and hint; `context` only when excerpts are forwarded. */
+  masked?: { detector: string; where: string; hint?: string; context?: string }[];
 }
 
 export interface AuditSink {
