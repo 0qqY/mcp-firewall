@@ -39,14 +39,15 @@ const CATEGORIES = {
 };
 const RADAR = ['injection', 'poisoning', 'dlp', 'rugpull', 'policy', 'method'];
 
+// cls picks the pill/marker shape: blk square, msk diamond, wrn hollow diamond, ok circle.
 const VERDICTS = {
-  block: { label: 'Engellendi', color: 'var(--danger)' },
-  would_block: { label: 'Engellenirdi', color: 'var(--warn)' },
-  redact: { label: 'Maskelendi', color: 'var(--blue)' },
-  would_redact: { label: 'Maskelenirdi', color: 'var(--warn)' },
-  warn: { label: 'Uyarı', color: 'var(--warn)' },
-  info: { label: 'Bilgi', color: 'var(--info)' },
-  allow: { label: 'İzin', color: 'var(--ok)' },
+  block: { label: 'Engellendi', cls: 'blk' },
+  would_block: { label: 'Engellenirdi', cls: 'wrn' },
+  redact: { label: 'Maskelendi', cls: 'msk' },
+  would_redact: { label: 'Maskelenirdi', cls: 'wrn' },
+  warn: { label: 'Uyarı', cls: 'wrn' },
+  info: { label: 'Bilgi', cls: '' },
+  allow: { label: 'İzin', cls: 'ok' },
 };
 const DETECTIONS = new Set(['block', 'would_block', 'redact', 'would_redact', 'warn']);
 const BLOCKS = new Set(['block', 'would_block']);
@@ -55,7 +56,7 @@ const DAYS = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
 const THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95];
 const DAY = 86400e3;
 
-const VIEWS = { overview: 'Dashboard', events: 'Olay Merkezi', ml: 'ML Olayları' };
+const VIEWS = { overview: 'Genel bakış', events: 'Olaylar', ml: 'ML olayları' };
 const EVENT_TABS = [['detections', 'Tespitler'], ['blocked', 'Engellenen'], ['warn', 'Uyarılar'], ['all', 'Tümü']];
 
 const state = {
@@ -68,8 +69,8 @@ const state = {
   tab: 'detections',
   category: '',
   q: '',
-  range: '24h',
-  radarMode: 'radar',
+  overviewId: null,
+  radarMode: 'list',
   threshold: null,
   lastRead: null,
 };
@@ -123,6 +124,8 @@ const subject = (e) => e.tool || e.method || 'firewall';
 const NORMAL = { label: 'Normal trafik', short: 'Normal', icon: 'check', bg: '#e8f6ee', fg: '#30a46c' };
 const cat = (e) => (e.verdict === 'allow' ? NORMAL : CATEGORIES[e.category] ?? CATEGORIES.other);
 const verdict = (e) => VERDICTS[e.verdict] ?? VERDICTS.info;
+const pill = (e) => h('span', { class: `vd ${verdict(e).cls}` }, verdict(e).label);
+const clock = (ts) => new Date(ts).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
 
 function avatarColor(name) {
   let hash = 0;
@@ -198,16 +201,11 @@ function derive() {
   return { events, labels, config, detections, ml, pending };
 }
 
-function buckets(events, range) {
-  const [count, size] = range === '7d' ? [28, 6 * 3600e3] : [24, 3600e3];
+function buckets(events, count = 12) {
+  const size = 3600e3;
   const end = Math.ceil(Date.now() / size) * size;
   const start = end - count * size;
-  const out = Array.from({ length: count }, (_, i) => {
-    const t = new Date(start + i * size);
-    return range === '7d'
-      ? { n: 0, label: DAYS[t.getDay()], full: t.toLocaleString('tr-TR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) }
-      : { n: 0, label: `${pad2(t.getHours())}:00`, full: `${pad2(t.getHours())}:00–${pad2((t.getHours() + 1) % 24)}:00` };
-  });
+  const out = Array.from({ length: count }, (_, i) => ({ n: 0, label: `${pad2(new Date(start + i * size).getHours())}:00` }));
   for (const e of events) {
     const t = Date.parse(e.ts);
     if (t >= start && t < end) out[Math.floor((t - start) / size)].n++;
@@ -235,6 +233,7 @@ async function load() {
     const data = await res.json();
     state.lastRead = new Date();
     live.classList.remove('stale');
+    renderStatus(data.config);
     const last = data.events.at(-1);
     const signature = `${state.server}|${data.events.length}|${last?.id}|${Object.keys(data.labels).length}`;
     state.data = data;
@@ -246,6 +245,7 @@ async function load() {
     }
   } catch {
     live.classList.add('stale');
+    renderStatus();
   }
 }
 
@@ -283,21 +283,31 @@ function renderChrome() {
   const { config, detections } = derive();
   document.getElementById('title').textContent = VIEWS[state.view];
   for (const v of Object.keys(VIEWS)) document.getElementById(`view-${v}`).hidden = state.view !== v;
-  for (const b of document.querySelectorAll('[data-view]')) b.classList.toggle('active', b.dataset.view === state.view);
+  for (const b of document.querySelectorAll('[data-view]')) {
+    b.classList.toggle('active', b.dataset.view === state.view);
+    if (b.dataset.view === state.view) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  }
 
   const select = document.getElementById('server-filter');
   const servers = state.data?.servers ?? [];
   select.replaceChildren(h('option', { value: '' }, 'Tüm sunucular'), ...servers.map((s) => h('option', { value: s }, s)));
   select.value = state.server;
 
-  const badge = document.getElementById('mode-badge');
-  badge.textContent = config.mode ?? '';
-  badge.className = `mode-badge ${config.mode === 'monitor' ? 'monitor' : ''}`;
+  renderStatus(config);
 
   const bell = document.getElementById('bell');
   const recentBlocks = detections.filter((e) => BLOCKS.has(e.verdict) && ago(e.ts) < 3600e3).length;
   bell.replaceChildren(icon('bell', 17), recentBlocks ? h('span', { class: 'dot' }) : null);
   bell.title = recentBlocks ? `Son 1 saatte ${recentBlocks} engelleme` : 'Son 1 saatte engelleme yok';
+}
+
+function renderStatus(config = derive().config) {
+  const live = document.getElementById('live');
+  const stale = live.classList.contains('stale');
+  const mode = config.mode ? config.mode[0].toUpperCase() + config.mode.slice(1) : '';
+  live.classList.toggle('monitor', config.mode === 'monitor');
+  document.getElementById('mode-badge').textContent = stale ? 'Bağlantı yok' : mode ? `${mode} · canlı` : 'Canlı';
 }
 
 function renderFoot() {
@@ -312,22 +322,75 @@ function renderFoot() {
 
 // ---------- overview ----------
 
-function recentCard({ detections }) {
-  const rows = detections.slice(-14).reverse().map((e) =>
-    h('div', { class: 'event-row' },
-      tile(e),
-      h('div', { style: { minWidth: '0' } },
-        h('div', { class: 'event-name', onclick: () => openEvent(e), title: e.reason ?? '' }, subject(e)),
-        h('div', { class: 'event-meta' }, `${rel(e.ts)} · ${e.server ?? '—'}`)),
-      h('div', { class: 'event-verdict', style: { color: verdict(e).color } }, verdict(e).label)));
-  return h('article', { class: 'card' },
-    h('div', { class: 'card-head' },
-      h('span', { class: 'card-title' }, 'Son olaylar'),
-      h('span', { class: 'spacer' }),
-      h('button', { class: 'btn-dark', onclick: () => setView('events', { tab: 'detections' }) }, 'Tümü', icon('arrowRight', 12, 2.2))),
-    rows.length
-      ? h('div', { class: 'list' }, rows)
-      : h('div', { class: 'empty' }, h('b', {}, 'Henüz tespit yok'), 'Firewall bir MCP sunucusunun önünde çalıştıkça olaylar burada görünür.'));
+function statsRow({ events }) {
+  const day = events.filter((e) => ago(e.ts) < DAY);
+  const count = (...v) => day.filter((e) => v.includes(e.verdict)).length;
+  const stat = (cls, n, text, note) => h('div', { class: 'stat' }, h('span', { class: `badge-n ${cls}` }, String(n)), h('p', {}, text, h('small', {}, note)));
+  return h('div', { class: 'wrap' }, h('section', { class: 'stats', 'aria-label': 'Özet sayılar' },
+    stat('blk', count('block'), 'Engellenen', 'son 24 saat'),
+    stat('msk', count('redact'), 'Maskelenen', 'son 24 saat'),
+    stat('ok', count('allow'), 'İzin verilen', 'loglananlar, 24 saat'),
+    stat('ink', (state.data?.servers ?? []).length, 'Sunucu', 'audit logunda')));
+}
+
+/** Hourly detections as stations on a line: the station grows with the count. */
+function lineMap({ detections }) {
+  const data = buckets(detections);
+  const top = Math.max(...data.map((b) => b.n));
+  const peak = top ? data.reduce((best, b, i) => (b.n >= data[best].n ? i : best), 0) : -1;
+  const cols = data.map((b, i) => {
+    const st = h('i', { class: `st ${b.n ? '' : 'z'}` });
+    st.style.setProperty('--d', `${b.n ? Math.round(22 + (56 * b.n) / top) : 18}px`);
+    return h('div', { class: `col ${i === peak ? 'pk' : ''}` }, h('b', {}, String(b.n)), st, h('span', { class: 'hr' }, b.label));
+  });
+  return h('section', { class: 'map', 'aria-labelledby': 'saatlik' },
+    h('div', { class: 'wrap' },
+      h('div', { class: 'sec-h' },
+        h('h2', { id: 'saatlik' }, 'Son 12 saatte tespitler'),
+        h('p', {}, peak < 0 ? 'Son 12 saatte tespit yok.' : `Durak büyüklüğü tespit sayısını gösterir. En yoğun saat ${data[peak].label}, ${top} tespit.`)),
+      h('div', { class: 'line', role: 'img', 'aria-label': `Saatlik tespit sayısı, ${data[0].label} ile ${data.at(-1).label} arası: ${data.map((b) => b.n).join(', ')}` },
+        h('div', { class: 'cols', 'aria-hidden': 'true' }, cols))));
+}
+
+function routeList(recent, selected) {
+  return h('section', { 'aria-labelledby': 'son-olaylar' },
+    h('div', { class: 'sec-h' },
+      h('h2', { id: 'son-olaylar' }, 'Son olaylar'),
+      h('button', { class: 'btn-dark', onclick: () => setView('events', { tab: 'detections' }) }, 'Tümü', icon('arrowRight', 14, 2.2))),
+    recent.length
+      ? h('ol', { class: 'route' }, recent.map((e) =>
+        h('li', { class: e === selected ? 'on' : '' },
+          h('button', { 'aria-current': e === selected ? 'true' : null, title: e.reason ?? '', onclick: () => { state.overviewId = e.id; renderOverview(); } },
+            h('span', { class: `mk ${verdict(e).cls}`, 'aria-hidden': 'true' }),
+            h('span', { class: 'tm' }, clock(e.ts)),
+            h('span', { class: 'tl' }, subject(e)),
+            h('span', { class: 'rs' }, e.reason ?? cat(e).label),
+            pill(e)))))
+      : h('div', { class: 'route' }, h('div', { class: 'route-empty' }, h('b', {}, 'Henüz tespit yok'), 'Firewall bir MCP sunucusunun önünde çalıştıkça olaylar burada görünür.')));
+}
+
+function signPanel(e, labels) {
+  if (!e) {
+    return h('section', { class: 'sign', 'aria-label': 'Seçili olay' }, h('div', { class: 'empty' }, h('b', {}, 'Olay seçilmedi'), 'Soldaki listeden bir olay seç.'));
+  }
+  const review = labels[e.id];
+  const detection = DETECTIONS.has(e.verdict);
+  return h('section', { class: 'sign', 'aria-labelledby': 'secili-olay' },
+    h('h2', { class: 'name', id: 'secili-olay' }, 'Seçili olay'),
+    h('h3', {}, typeof e.score === 'number' ? `${cat(e).label}, ML skoru ${e.score.toFixed(3)}` : cat(e).label),
+    e.excerpt ? h('div', {}, h('p', { class: 'q-l' }, 'Tetikleyen metin'), h('blockquote', { class: 'q' }, e.excerpt)) : null,
+    h('dl', { class: 'meta' },
+      h('dt', {}, 'Araç'), h('dd', {}, subject(e)),
+      h('dt', {}, 'Sunucu'), h('dd', {}, e.server ?? '—'),
+      h('dt', {}, 'Gerekçe'), h('dd', {}, e.reason ?? '—'),
+      h('dt', {}, 'Zaman'), h('dd', {}, fmtTime(e.ts)),
+      h('dt', {}, 'Karar'), h('dd', {}, pill(e))),
+    h('div', { class: 'act' },
+      detection ? [
+        h('button', { class: 'btn-sign ok', 'aria-pressed': review === 'true_positive', onclick: () => label(e, 'true_positive') }, review === 'true_positive' ? [icon('check', 16, 2.4), 'Doğrulandı'] : 'Doğru tespit'),
+        h('button', { class: 'btn-sign no', 'aria-pressed': review === 'false_positive', onclick: () => label(e, 'false_positive') }, review === 'false_positive' ? [icon('check', 16, 2.4), 'Yanlış alarm'] : 'Yanlış alarm'),
+      ] : null,
+      h('button', { class: 'btn-sign no', onclick: () => openEvent(e) }, 'Ayrıntı', icon('arrowRight', 16, 2.2))));
 }
 
 function radarCard({ detections }) {
@@ -363,11 +426,11 @@ function radarCard({ detections }) {
   const svg = h('svg:svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Kategoriye göre tespit sayıları' });
   for (const f of [0.25, 0.5, 0.75, 1]) {
     const ring = RADAR.map((_, i) => [cx + R * f * Math.cos(angle(i)), cy + R * f * Math.sin(angle(i))]);
-    svg.append(h('svg:polygon', { points: ring.map((p) => p.join(',')).join(' '), fill: 'none', stroke: '#f2ebe5' }));
+    svg.append(h('svg:polygon', { points: ring.map((p) => p.join(',')).join(' '), fill: 'none', stroke: 'var(--line)' }));
   }
   RADAR.forEach((c, i) => {
     const [x, y] = [cx + R * Math.cos(angle(i)), cy + R * Math.sin(angle(i))];
-    svg.append(h('svg:line', { x1: cx, y1: cy, x2: x, y2: y, stroke: '#f2ebe5' }));
+    svg.append(h('svg:line', { x1: cx, y1: cy, x2: x, y2: y, stroke: 'var(--line)' }));
     const [lx, ly] = [cx + (R + 24) * Math.cos(angle(i)), cy + (R + 20) * Math.sin(angle(i))];
     const anchor = Math.abs(lx - cx) < 5 ? 'middle' : lx > cx ? 'start' : 'end';
     svg.append(h('svg:text', { x: lx, y: ly, 'text-anchor': anchor, class: 'radar-label' }, CATEGORIES[c].short));
@@ -428,62 +491,6 @@ function mlCard({ config, ml, labels, events }) {
     h('a', { class: 'btn-dark btn-block', href: '/api/labels.jsonl', download: 'mcp-firewall-labels.jsonl', style: { textDecoration: 'none' } }, icon('download', 14), 'Etiketleri indir (.jsonl)'));
 }
 
-function trendCard({ detections }) {
-  const wrap = h('div', { class: 'chart-wrap' });
-  const card = h('article', { class: 'card' },
-    h('div', { class: 'card-head' },
-      h('span', { class: 'card-title' }, 'Tespit trendi'),
-      h('span', { class: 'spacer' }),
-      h('label', { class: 'pill-select' },
-        h('select', { 'aria-label': 'Zaman aralığı', onchange: (ev) => { state.range = ev.target.value; render(); } },
-          h('option', { value: '24h', selected: state.range === '24h' }, 'Son 24 saat'),
-          h('option', { value: '7d', selected: state.range === '7d' }, 'Son 7 gün')))),
-    wrap);
-  queueMicrotask(() => drawTrend(wrap, buckets(detections, state.range)));
-  return card;
-}
-
-function drawTrend(wrap, data) {
-  wrap.replaceChildren();
-  const W = Math.max(240, wrap.clientWidth), H = Math.max(160, wrap.clientHeight);
-  const pad = { l: 30, r: 12, t: 30, b: 24 };
-  const top = Math.max(4, Math.ceil(Math.max(...data.map((b) => b.n)) / 4) * 4);
-  const x = (i) => pad.l + ((W - pad.l - pad.r) * i) / (data.length - 1);
-  const y = (v) => pad.t + (H - pad.t - pad.b) * (1 - v / top);
-  const svg = h('svg:svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Zamana göre tespit sayısı' });
-  for (let k = 0; k <= 4; k++) {
-    const v = (top * k) / 4;
-    svg.append(h('svg:line', { x1: pad.l, x2: W - pad.r, y1: y(v), y2: y(v), stroke: '#f3ece6' }));
-    svg.append(h('svg:text', { x: pad.l - 8, y: y(v) + 3, 'text-anchor': 'end', class: 'axis' }, String(v)));
-  }
-  const step = Math.ceil(data.length / 7);
-  data.forEach((b, i) => {
-    if (i % step === 0) svg.append(h('svg:text', { x: x(i), y: H - 6, 'text-anchor': 'middle', class: 'axis' }, b.label));
-  });
-  const pts = data.map((b, i) => [x(i), y(b.n)]);
-  svg.append(h('svg:path', { d: monotonePath(pts), fill: 'none', stroke: 'var(--ink)', 'stroke-width': 2.2, 'stroke-linecap': 'round' }));
-  const guide = h('svg:line', { stroke: 'var(--ink)', 'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: 0.35 });
-  const dot = h('svg:circle', { r: 5.5, fill: 'var(--peach)', stroke: 'var(--ink)', 'stroke-width': 2 });
-  svg.append(guide, dot);
-  const tip = h('div', { class: 'tip' });
-  const show = (i) => {
-    const [px, py] = pts[i];
-    for (const [k, v] of [['cx', px], ['cy', py]]) dot.setAttribute(k, v);
-    for (const [k, v] of [['x1', px], ['x2', px], ['y1', py], ['y2', H - pad.b]]) guide.setAttribute(k, v);
-    tip.textContent = `${data[i].n} tespit · ${data[i].full}`;
-    const half = (tip.offsetWidth || 120) / 2;
-    Object.assign(tip.style, { left: `${Math.min(Math.max(px, half), W - half)}px`, top: `${py}px` });
-  };
-  svg.addEventListener('mousemove', (ev) => {
-    const mx = ev.clientX - svg.getBoundingClientRect().left;
-    let best = 0;
-    pts.forEach((p, i) => { if (Math.abs(p[0] - mx) < Math.abs(pts[best][0] - mx)) best = i; });
-    show(best);
-  });
-  show(data.reduce((best, b, i) => (b.n >= data[best].n ? i : best), 0));
-  wrap.append(svg, tip);
-}
-
 function promoCard({ pending }) {
   const art = h('svg:svg', { width: 150, height: 96, viewBox: '0 0 150 96', fill: 'none', stroke: 'var(--peach-ink)', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' },
     h('svg:path', { d: 'M48 14 22 24v20c0 18 11 28 26 32 15-4 26-14 26-32V24z' }),
@@ -502,9 +509,14 @@ function promoCard({ pending }) {
 
 function renderOverview() {
   const d = derive();
+  const recent = d.detections.slice(-8).reverse();
+  const selected = recent.find((e) => e.id === state.overviewId) ?? recent[0];
   document.getElementById('view-overview').replaceChildren(
-    recentCard(d), radarCard(d), quickCard(d),
-    mlCard(d), trendCard(d), promoCard(d));
+    statsRow(d),
+    lineMap(d),
+    h('div', { class: 'wrap' },
+      h('div', { class: 'ov-main' }, routeList(recent, selected), signPanel(selected, d.labels)),
+      h('div', { class: 'ov-extra' }, radarCard(d), quickCard(d), mlCard(d), promoCard(d))));
 }
 
 // ---------- event center ----------
@@ -576,7 +588,7 @@ function kpis({ detections, ml, pending, labels }) {
 
 function detailPane(e, labels) {
   if (!e) {
-    return h('div', { class: 'detail' }, h('div', { class: 'empty', style: { color: 'var(--blue-soft)', margin: 'auto' } }, h('b', {}, 'Olay seçilmedi'), 'Soldaki listeden bir olay seç.'));
+    return h('div', { class: 'detail' }, h('div', { class: 'empty' }, h('b', {}, 'Olay seçilmedi'), 'Soldaki listeden bir olay seç.'));
   }
   const review = labels[e.id];
   const detection = DETECTIONS.has(e.verdict);
@@ -585,7 +597,7 @@ function detailPane(e, labels) {
     h('div', { class: 'd-top' },
       h('div', {},
         h('div', { class: 'd-label' }, 'Olay detayı'),
-        h('div', { class: 'd-id' }, `# ${evId(e)}`, h('span', { class: 'badge' }, verdict(e).label))),
+        h('div', { class: 'd-id' }, `# ${evId(e)}`, pill(e))),
       h('div', {}, h('div', { class: 'd-label' }, 'Sunucu'), h('div', { class: 'd-strong' }, e.server ?? '—')),
       h('div', {}, h('div', { class: 'd-label' }, 'Araç / metod'), h('div', { class: 'd-strong' }, subject(e)))),
     h('div', { class: 'd-cards' },
@@ -652,7 +664,7 @@ function renderEvents() {
             h('button', { class: `p-item ${e.id === state.selectedId ? 'active' : ''}`, onclick: () => { state.selectedId = e.id; renderEvents(); } },
               tile(e, 32),
               h('div', { style: { minWidth: '0' } }, h('div', { class: 'p-id' }, `# ${evId(e)}`), h('div', { class: 'p-sub' }, `${subject(e)} · ${rel(e.ts)}`)),
-              h('div', { class: 'p-side' }, h('span', { class: 'badge' }, verdict(e).label), h('span', { class: 'p-cat' }, cat(e).short)))))
+              h('div', { class: 'p-side' }, pill(e), h('span', { class: 'p-cat' }, cat(e).short)))))
           : h('div', { class: 'empty' }, h('b', {}, 'Olay yok'), 'Filtreleri değiştirmeyi dene.')),
       detailPane(selected, d.labels)));
 }
@@ -787,27 +799,9 @@ function selectServer(value) {
 }
 
 function initShell() {
-  const logo = document.querySelector('.rail-logo');
-  logo.append(h('svg:svg', { width: 30, height: 30, viewBox: '0 0 30 30', fill: 'none', 'aria-hidden': 'true' },
-    h('svg:circle', { cx: 15, cy: 15, r: 11, stroke: '#2a2c30', 'stroke-width': 4 }),
-    h('svg:path', { d: 'M15 4a11 11 0 1 1-10.4 7.4', stroke: 'var(--peach)', 'stroke-width': 4, 'stroke-linecap': 'round' })));
-
-  const railIcons = { overview: 'home', events: 'shield', ml: 'cpu', export: 'download', help: 'help' };
-  for (const btn of document.querySelectorAll('.rail-btn')) {
-    btn.append(icon(railIcons[btn.dataset.view ?? btn.dataset.action], 19));
-    btn.setAttribute('aria-label', btn.dataset.tip);
-  }
   for (const btn of document.querySelectorAll('[data-view]')) btn.addEventListener('click', () => setView(btn.dataset.view));
-  document.querySelector('[data-action="export"]').addEventListener('click', () => { location.href = '/api/labels.jsonl'; });
-  document.querySelector('[data-action="help"]').addEventListener('click', () => toast('Firewall: mcp-firewall --policy policy.yaml -- <sunucu komutu>'));
   document.getElementById('bell').addEventListener('click', () => setView('events', { tab: 'blocked', selectedId: null }));
   document.getElementById('server-filter').addEventListener('change', (ev) => selectServer(ev.target.value));
-
-  let resizeTimer;
-  window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => state.view === 'overview' && renderOverview(), 150);
-  });
 }
 
 initShell();
