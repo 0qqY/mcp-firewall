@@ -1,6 +1,7 @@
 /**
  * Finds encoded runs inside text (base64/base64url, hex, percent-encoding, \u / \x escapes, HTML numeric
- * entities) and decodes them, so instructions hidden as "aWdub3JlIHByZXZpb3Vz..." are scanned as text.
+ * entities, ROT13) and decodes them, so instructions hidden as "aWdub3JlIHByZXZpb3Vz..." are scanned as text.
+ * Payloads split into quoted pieces the model is asked to join ("'ign' + 'ore'") are joined back.
  * The model can decode these itself, so a scanner that only reads the surface is easy to walk past.
  * Only decodings that come out as readable text are kept: hashes, keys and binary blobs drop out.
  */
@@ -75,6 +76,42 @@ function fromInvisible(run: string): string | undefined {
   return bytesToText(Uint8Array.from(bytes));
 }
 
+/**
+ * Frequent words of English and Turkish prose, instructions in particular. ROT13 output is only kept when it
+ * holds many of them and the run itself did not: ordinary text rotated by 13 turns into gibberish, and
+ * ROT13 gibberish rotated back turns into these words.
+ */
+const COMMON_WORDS = new Set((
+  'the a an and or but not no to of in on at by for from with as is are was be been it its this that these those ' +
+  'you your yours we our they them their he she his her i me my all any some every each other only now then also ' +
+  'do does did done have has had will would should can could must may please just before after first next ' +
+  'ignore disregard forget previous prior above earlier instructions instruction rules rule system prompt message ' +
+  'user assistant tell say said show reveal send read write print output reply respond answer email mail address ' +
+  'password key keys secret secrets token file files data contents content following below new task tasks follow ' +
+  'what who how why when where which there here into out up about over again more most very ' +
+  've veya ile bir bu şu o da de ki mi için gibi kadar daha çok her tüm bütün hiç sonra önce şimdi lütfen ' +
+  'önceki talimat talimatları talimatı talimatlar kural kuralları sistem mesaj mesajı kullanıcı kullanıcının ' +
+  'yok say unut göster gönder oku yaz yanıt cevap dosya dosyaları şifre anahtar gizli veri içeriği yeni görev'
+).split(' '));
+
+export const rot13 = (text: string): string =>
+  text.replace(/[A-Za-z]/g, (c) => {
+    const base = c <= 'Z' ? 65 : 97;
+    return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+  });
+
+/** Words of two or more letters, and how many of them are common; single letters ("a", "o") prove nothing. */
+function commonWords(text: string): [words: number, common: number] {
+  const words = text.toLocaleLowerCase('tr').match(/\p{L}{2,}/gu) ?? [];
+  return [words.length, words.filter((w) => COMMON_WORDS.has(w)).length];
+}
+
+function fromRot13(run: string): string | undefined {
+  const decoded = rot13(run);
+  const [words, common] = commonWords(decoded);
+  return words >= 3 && common >= 2 && common >= words * 0.3 && common > commonWords(run)[1] * 2 ? decoded : undefined;
+}
+
 /** Each encoding: where it may occur, and how to decode one occurrence. */
 const DECODERS: [RegExp, (run: string) => string | undefined][] = [
   // At least 20 base64 characters; mixed case or digits keeps ordinary long words out cheaply.
@@ -84,22 +121,65 @@ const DECODERS: [RegExp, (run: string) => string | undefined][] = [
   [/(?:\\u[0-9a-fA-F]{4}|\\x[0-9a-fA-F]{2}){6,}/g, fromEscapes],
   [/(?:&#(?:x[0-9a-fA-F]+|\d+);){6,}/g, fromEntities],
   [/[\u{E0000}-\u{E01EF}︀-️]{8,}/gu, fromInvisible],
+  // Three or more words in one sentence: ROT13 keeps spaces and punctuation, so a hidden sentence stays one run.
+  [/\p{L}[\p{L}']*(?:[ \t,;:"'()-]+\p{L}[\p{L}']*){2,}/gu, fromRot13],
 ];
+
+// One quoted piece on one line, in straight, curly or back quotes. A single quote right after a letter is an
+// apostrophe ("don't", Turkish "İstanbul'da"), never an opening quote.
+const PIECE = '"([^"\\n]{1,120})"|(?<![\\p{L}\\p{N}])\'([^\'\\n]{1,120})\'|`([^`\\n]{1,120})`|“([^”\\n]{1,120})”|(?<![\\p{L}\\p{N}])‘([^’\\n]{1,120})’';
+const pieceValue = (m: RegExpMatchArray, from = 1): string => m.slice(from, from + 5).find((v) => v !== undefined) ?? '';
+const JOIN_CUE = /\b(?:combine|concatenat\w*|concat|join|merge|append|glue|put (?:them |these |it )?together)\b|birleştir|yan yana|art arda|ardı ardına|uç uca/iu;
+const MAX_PIECES = 16;
+
+/**
+ * Payload splitting: an instruction cut into quoted pieces the model is asked to put back together.
+ * Three shapes: `'ign' + 'ore'`, variables (`a = 'ignore all'; b = 'previous rules'; do a + b`), and a
+ * sentence asking for the pieces to be joined ("join 'ign' and 'ore'", "'ign' ve 'ore' kelimelerini
+ * birleştir"). Returns the text with the pieces joined in place and, for a joining sentence, its pieces
+ * joined without and with spaces.
+ */
+export function joinPieces(text: string): string[] {
+  if (!/["'`“‘]/.test(text)) return [];
+  const out: string[] = [];
+  const vars = new Map<string, string>();
+  for (const m of text.matchAll(new RegExp(`\\b([A-Za-z_]\\w{0,15})\\s*(?:=|:=|:)\\s*(?:${PIECE})`, 'gu'))) vars.set(m[1], pieceValue(m, 2));
+  let joined = text.replace(new RegExp(`(?:${PIECE})(?:\\s*\\+\\s*(?:${PIECE}))+`, 'gu'), (expr) =>
+    [...expr.matchAll(new RegExp(PIECE, 'gu'))].map((m) => pieceValue(m)).join(''));
+  if (vars.size >= 2) {
+    joined = joined.replace(/\b[A-Za-z_]\w{0,15}(?:\s*\+\s*[A-Za-z_]\w{0,15})+\b/g, (expr) => {
+      const names = expr.split('+').map((n) => n.trim());
+      return names.every((n) => vars.has(n)) ? names.map((n) => vars.get(n)).join('') : expr;
+    });
+  }
+  if (joined !== text) out.push(joined);
+  for (const line of text.split('\n')) {
+    if (!JOIN_CUE.test(line)) continue;
+    const pieces = [...line.matchAll(new RegExp(PIECE, 'gu'))].map((m) => pieceValue(m)).slice(0, MAX_PIECES);
+    if (pieces.length >= 2) out.push(pieces.join(''), pieces.join(' '));
+  }
+  return [...new Set(out)];
+}
 
 /** Decoded texts found in `text`, including encodings nested up to two levels deep. */
 export function decodeEmbedded(text: string): string[] {
   const found: string[] = [];
   let budget = MAX_OUTPUT_CHARS;
+  /** Records one decoding and looks inside it; false once the result or size budget is spent. */
+  const keep = (decoded: string | undefined, depth: number): boolean => {
+    if (found.length >= MAX_RESULTS || budget <= 0) return false;
+    if (!decoded || found.includes(decoded)) return true;
+    found.push(decoded.slice(0, budget));
+    budget -= decoded.length;
+    if (depth < MAX_DEPTH) visit(decoded, depth + 1);
+    return true;
+  };
   const visit = (source: string, depth: number): void => {
+    for (const joined of joinPieces(source)) if (!keep(joined, depth)) return;
     for (const [pattern, decode] of DECODERS) {
       for (const match of source.matchAll(pattern)) {
-        if (found.length >= MAX_RESULTS || budget <= 0) return;
         if (match[0].length > MAX_RUN_CHARS) continue;
-        const decoded = decode(match[0]);
-        if (!decoded || found.includes(decoded)) continue;
-        found.push(decoded.slice(0, budget));
-        budget -= decoded.length;
-        if (depth < MAX_DEPTH) visit(decoded, depth + 1);
+        if (!keep(decode(match[0]), depth)) return;
       }
     }
   };

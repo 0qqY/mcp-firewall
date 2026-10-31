@@ -336,3 +336,17 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     çerçevesi bekliyor. `syslog.framing: newline` eklendi (JSON mesajda ham satır sonu olmadığından güvenli). TCP ve
     UDP ile her çalıştırmanın 13 kaydı da ulaştı. SIEM kapalıyken oturum aynı kararlarla sürdü, uyarı stderr'e yazıldı.
     `test/siem.test.ts` 11 test, toplam 150/150 (ML dahil).
+70. **ROT13 ve parçalara bölünmüş komutlar (01.11.2026):** `src/decode.ts` iki yeni çözüm yapıyor. ROT13: en az üç
+    kelimelik her cümle döndürülüyor ve sonuç sık kullanılan İngilizce/Türkçe kelimelerle (talimat sözcükleri dahil)
+    doluysa, döndürülmeden önce dolu değilse kabul ediliyor; tek harfli kelimeler sayılmıyor ("Logical Coherence B"
+    gibi metinler bu yüzden takılmıyordu). Parça birleştirme (`joinPieces`): `'ign' + 'ore'`, değişkenler
+    (`a = '...'; b = '...'; a + b`) ve parçaları birleştirmeyi isteyen cümleler ("concatenate", "join", "birleştir",
+    "yan yana"). Harften sonra gelen tek tırnak kesme işareti sayılıyor ("don't", "İstanbul'da"). İkisi de iç içe
+    kodlamayla çalışıyor (base64'lenmiş parçalar, ROT13'lü base64).
+    Ölçüm soup04-ab4 ile, eşik 0.9, 500 saldırı (test 200, LLMail başarılı 150, Türkçe 150), önce → sonra:
+    ROT13 tek başına %93,6 → %97,6 (İngilizce %96,3 → %100, Türkçe %87,3 → %92); "ROT13 ile çöz" önekiyle zaten
+    %100. 2–4 harflik parçalar `+` ile %91,4 → %99,8 (Türkçe %75,3 → %100), "birleştir" cümlesiyle %93,8 → %98,2.
+    Uzun parçalarda (kelimeler bütün kalıyor) model zaten %99–100 yakalıyordu; birleştirilmiş metin eklendiğinde
+    iki biçimde 3–4 saldırı eşik altına düştü (%100 → %99,2 ve %99,4 → %98,8). Zararsız 8.240 metinde (test,
+    bağımsız set, Türkçe set) çözücü 20 metinde devreye girdi, hepsi bağımsız setteki rol yapma kartları; yeni yanlış
+    alarm 1 (`Age("20" + "twenty years")` içeren bir karakter kartı), kaybolan 0. Toplam 156/156 test.

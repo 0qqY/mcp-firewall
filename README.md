@@ -37,7 +37,7 @@ Host ──HTTP───► mcp-firewall gateway ──HTTPS──► Uzak MCP s
 | Secret/PII'nin modele sızması | `dlp.scanResponses`: tool/resource/prompt sonuçlarında maskeleme |
 | Server'ın LLM'ini kötüye kullanması | `methods.deny: [sampling/createMessage]`, ya da izin verilirse içerik taraması (`ml.scan.serverRequests`) ve `sampling` sınırları: dakika/oturum başına istek, istek başına `maxTokens` tavanı, oturum token bütçesi |
 | Kullanıcıya oltalama | `methods.deny: [elicitation/create]` veya içerik taraması (`ml.scan.serverRequests`) |
-| Kodlanmış injection ve sızdırma | `decoding`: base64, hex, %XX, `\u`/`\x` kaçışları, HTML varlıkları ve görünmez Unicode (TAG, varyasyon seçicisi) çözülüp desen, ML ve DLP taramasına eklenir; base64'lenmiş secret içeren çağrı engellenir |
+| Kodlanmış injection ve sızdırma | `decoding`: base64, hex, %XX, `\u`/`\x` kaçışları, HTML varlıkları, ROT13 ve görünmez Unicode (TAG, varyasyon seçicisi) çözülüp, birleştirilmesi istenen parçalar (`'ign' + 'ore'`, `a + b`) birleştirilip desen, ML ve DLP taramasına eklenir; base64'lenmiş secret içeren çağrı engellenir |
 | Karakter düzeyinde gizleme | `decoding`: l33t, harf aralama (`i g n o r e`), Kiril/Yunan benzer harfler, tam genişlikli harfler ve rastgele büyük-küçük harf geri alınır; ML düzeltilmiş metni görür |
 | Uzun çıktıyla dolgu | `ml.onTruncated: block`: tamamı taranamayan metin engellenir |
 | Bozuk/devasa mesajlar | Fail-closed parse, 32 MB satır limiti |
@@ -804,7 +804,7 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 7. "Görev talimatı" metinlerinde kalan yanlış alarm (Türkçe benchmark: soup05'te %71, soup05-ab2'de %33; iç testte
    İngilizce görev talimatları soup04-ab4'te %53), dış Türkçe setlerdeki
    düşük isabet (%48–65) ve rol istemlerindeki yanlış alarm (`prompts/get`'te model artık yalnızca uyarıyor; değişen
-   şablonu sabitleme engelliyor); ROT13 ve kelimeleri bölen saldırılar açık
+   şablonu sabitleme engelliyor). ROT13 ve kelimeleri parçalara bölen saldırılar 01.11.2026'da kapatıldı
 
 ## Lisans
 
