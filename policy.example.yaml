@@ -1,4 +1,4 @@
-# MCP Firewall politika dosyası
+# Tuuf MCP Firewall politika dosyası
 # Göreli dosya yolları bu dosyanın bulunduğu dizine göre çözülür.
 version: 1
 

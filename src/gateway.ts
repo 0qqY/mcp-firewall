@@ -377,7 +377,7 @@ export class Gateway {
   async toUpstream(session: Session, msg: JsonRpcMessage): Promise<void> {
     const fail = (reason: string) => {
       this.options.audit.record({ direction: 'client->server', method: msg.method, verdict: 'warn', reason: `gateway: ${reason}` });
-      if (isRequest(msg)) session.fromServer({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: `MCP Firewall gateway: ${reason}` } });
+      if (isRequest(msg)) session.fromServer({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: `Tuuf MCP Firewall gateway: ${reason}` } });
     };
     let res: Response;
     try {

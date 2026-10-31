@@ -1,4 +1,4 @@
-// MCP Firewall dashboard. Audit data is attacker-influenced (tool names, excerpts), so every value
+// Tuuf MCP Firewall dashboard. Audit data is attacker-influenced (tool names, excerpts), so every value
 // reaches the DOM through textContent/attributes via h(); nothing is ever assigned to innerHTML.
 
 const SVG_NS = 'http://www.w3.org/2000/svg';

@@ -82,7 +82,7 @@ export function errorResponse(id: JsonRpcId | undefined, reason: string): JsonRp
   return {
     jsonrpc: '2.0',
     id: id ?? null,
-    error: { code: FIREWALL_ERROR_CODE, message: `Blocked by MCP Firewall: ${reason}` },
+    error: { code: FIREWALL_ERROR_CODE, message: `Blocked by Tuuf MCP Firewall: ${reason}` },
   };
 }
 
@@ -91,6 +91,6 @@ export function toolErrorResponse(id: JsonRpcId | undefined, reason: string): Js
   return {
     jsonrpc: '2.0',
     id: id ?? null,
-    result: { content: [{ type: 'text', text: `[MCP Firewall] Blocked: ${reason}` }], isError: true },
+    result: { content: [{ type: 'text', text: `[Tuuf MCP Firewall] Blocked: ${reason}` }], isError: true },
   };
 }

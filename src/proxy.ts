@@ -116,7 +116,7 @@ function approvalMessage(tool: string, args: unknown, why: string): string {
   const entries = isObject(clean) ? Object.entries(clean) : [['(arguments)', clean] as const];
   const lines = entries.slice(0, APPROVAL_MAX_ARGS).map(([k, v]) => `  ${oneLine(k)}: ${clip(v)}`);
   if (entries.length > APPROVAL_MAX_ARGS) lines.push(`  … and ${entries.length - APPROVAL_MAX_ARGS} more arguments`);
-  return `MCP Firewall: allow the call to ${quoted(tool)}?\nWhy it needs approval: ${oneLine(why)}\nArguments:\n${lines.join('\n') || '  (none)'}`;
+  return `Tuuf MCP Firewall: allow the call to ${quoted(tool)}?\nWhy it needs approval: ${oneLine(why)}\nArguments:\n${lines.join('\n') || '  (none)'}`;
 }
 
 /** Model-written text on one line, without hidden characters, so it cannot forge the prompt's layout. */

@@ -1,4 +1,6 @@
-# MCP Firewall
+# Tuuf MCP Firewall
+
+> Komut ve paket adı kısa kalır: `mcp-firewall`.
 
 MCP server'larının önüne geçen, politika uygulayan bir **stdio proxy** ve uzak sunucular için **HTTP gateway**.
 Host (Claude Desktop, Cursor, IDE) ile gerçek MCP server arasındaki her JSON-RPC mesajını parse eder, YAML

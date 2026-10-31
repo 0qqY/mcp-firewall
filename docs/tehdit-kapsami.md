@@ -1,6 +1,6 @@
-# MCP Firewall: bilinen saldırılara karşı kapsam (Ekim 2026)
+# Tuuf MCP Firewall: bilinen saldırılara karşı kapsam (Ekim 2026)
 
-Bu belge, kamuya açık olarak bilinen MCP saldırılarını MCP Firewall'un mevcut koduyla karşılaştırır
+Bu belge, kamuya açık olarak bilinen MCP saldırılarını Tuuf MCP Firewall'un mevcut koduyla karşılaştırır
 (`src/proxy.ts`, `src/engine.ts`, `src/policy.ts`, `src/pinning.ts`, `src/dlp.ts`, `src/ml/classifier.ts`).
 Saldırılar üç gruba ayrıldı:
 

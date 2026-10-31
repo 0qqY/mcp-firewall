@@ -1,4 +1,4 @@
-# MCP Firewall geliştirme günlüğü
+# Tuuf MCP Firewall geliştirme günlüğü
 
 Ürünün ve modelin bugüne kadar hangi sırayla geliştiği. Ölçüm sonuçları için [README](../README.md), saldırı
 kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).

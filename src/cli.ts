@@ -120,7 +120,7 @@ function runDashboard(argv: string[]): void {
   const audit = auditFile ?? policy.audit.file;
   const labelsFile = join(dirname(audit), 'mcp-firewall-labels.jsonl');
   startDashboard({ policy, auditFile: audit, labelsFile, port }).on('listening', () => {
-    process.stderr.write(`MCP Firewall dashboard: http://127.0.0.1:${port}\n  audit:  ${audit}\n  labels: ${labelsFile}\n`);
+    process.stderr.write(`Tuuf MCP Firewall dashboard: http://127.0.0.1:${port}\n  audit:  ${audit}\n  labels: ${labelsFile}\n`);
   });
 }
 
@@ -229,7 +229,7 @@ function runGateway(argv: string[]): void {
   }
   gateway.server.listen(Number(port), host.replace(/^\[|\]$/g, ''), () => {
     audit.record({ verdict: 'info', reason: `gateway started in ${policy.mode} mode: http://${listen}${path} -> ${upstream!.href}` });
-    process.stderr.write(`MCP Firewall gateway: http://${listen}${path} -> ${upstream!.href}\n`);
+    process.stderr.write(`Tuuf MCP Firewall gateway: http://${listen}${path} -> ${upstream!.href}\n`);
   });
   for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => (gateway.close(), void audit.flush().finally(() => process.exit(0))));
 }
