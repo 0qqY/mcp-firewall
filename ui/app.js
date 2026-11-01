@@ -51,6 +51,8 @@ const VERDICTS = {
 };
 const DETECTIONS = new Set(['block', 'would_block', 'redact', 'would_redact', 'warn']);
 const BLOCKS = new Set(['block', 'would_block']);
+/** Text the model let through, logged by `ml.review` so it can be labelled: attack it missed, or harmless. */
+const isReview = (e) => e.verdict === 'info' && typeof e.score === 'number' && Boolean(e.excerpt);
 const AVATAR_COLORS = ['#0038ff', '#e8590c', '#30a46c', '#8e4ec6', '#0b84d6', '#e5484d', '#d6409f', '#12a594'];
 const DAYS = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
 const THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95];
@@ -281,8 +283,9 @@ function derive() {
   const { events = [], labels = {}, config = {} } = state.data ?? {};
   const detections = events.filter((e) => DETECTIONS.has(e.verdict));
   const ml = detections.filter((e) => typeof e.score === 'number');
-  const pending = ml.filter((e) => e.excerpt && !labels[e.id]);
-  return { events, labels, config, detections, ml, pending };
+  const reviews = events.filter(isReview);
+  const pending = [...ml, ...reviews].filter((e) => e.excerpt && !labels[e.id]);
+  return { events, labels, config, detections, ml, reviews, pending };
 }
 
 function buckets(events, count = 12) {
@@ -334,6 +337,8 @@ const REASONS = [
   [/gateway started in (\w+) mode: /g, (_, m) => `ağ geçidi ${MODES[m] ?? m} modunda başladı: `],
   [/ML classifier (\S+) loaded in (\d+) ms/g, 'ML sınıflandırıcı $1, $2 ms içinde yüklendi'],
   [/ML classifier flagged possible prompt injection \(score ([\d.]+)\)/g, 'ML sınıflandırıcı olası prompt enjeksiyonu buldu (skor $1)'],
+  [/ML near miss for review \(score ([\d.]+)\)/g, 'eşiğe yakın kaldı, geçirildi; etiketlemen için kaydedildi (skor $1)'],
+  [/ML sample for review \(score ([\d.]+)\)/g, 'geçirilen trafikten örnek; etiketlemen için kaydedildi (skor $1)'],
   [/ML classifier failed: /g, 'ML sınıflandırıcı hata verdi: '],
   [/text too long to scan fully: only the first and last (\d+) chunks were checked/g, 'metin tamamı taranamayacak kadar uzun: yalnızca ilk ve son $1 parça kontrol edildi'],
   [/encoded sensitive data in (\w+): /g, (_, w) => `${where(w)} kodlanmış hassas veri: `],
@@ -890,6 +895,7 @@ function detailPane(e, labels) {
   }
   const review = labels[e.id];
   const detection = DETECTIONS.has(e.verdict);
+  const below = isReview(e);
   const ruleYaml = e.tool ? `tools:\n  rules:\n    - match: "${e.tool.replace(/"/g, '\\"')}"\n      action: deny\n      reason: "${evId(e)} incelemesi"\n` : null;
   return h('div', { class: 'detail' },
     h('div', { class: 'd-top' },
@@ -911,13 +917,23 @@ function detailPane(e, labels) {
     maskedBlock(e),
     h('div', { class: 'd-foot' },
       h('div', {}, h('span', { class: 'd-label' }, 'Zaman'), h('b', {}, fmtTime(e.ts))),
-      h('div', {}, h('span', { class: 'd-label' }, 'Doğrulama'), h('b', {}, review === 'true_positive' ? 'Doğru tespit' : review === 'false_positive' ? 'Yanlış pozitif' : detection ? 'Bekliyor' : '—')),
+      h('div', {}, h('span', { class: 'd-label' }, 'Doğrulama'), h('b', {}, detection || below ? reviewText(e, review, 'Doğru tespit', 'Yanlış pozitif', 'Bekliyor') : '—')),
       h('div', {}, h('span', { class: 'd-label' }, 'Eğitime uygun'), h('b', {}, e.excerpt ? 'Evet' : 'Hayır')),
       detection
         ? h('div', { class: 'd-actions' },
           h('button', { class: 'btn-ghost', 'aria-pressed': String(review === 'false_positive'), title: review === 'false_positive' ? 'Etiketi geri almak için tekrar tıkla' : null, onclick: () => label(e, 'false_positive') }, icon(review === 'false_positive' ? 'check' : 'x', 14, 2.2), 'Yanlış pozitif'),
           h('button', { class: 'btn-white-pill', 'aria-pressed': String(review === 'true_positive'), title: review === 'true_positive' ? 'Etiketi geri almak için tekrar tıkla' : null, onclick: () => label(e, 'true_positive') }, icon('check', 14, 2.4), review === 'true_positive' ? 'Doğrulandı' : 'Doğru tespit'))
-        : null));
+        : below
+          ? h('div', { class: 'd-actions' },
+            h('button', { class: 'btn-ghost', 'aria-pressed': String(review === 'false_positive'), title: review === 'false_positive' ? 'Etiketi geri almak için tekrar tıkla' : null, onclick: () => label(e, 'false_positive') }, icon('check', 14, 2.2), 'Zararsız'),
+            h('button', { class: 'btn-white-pill', 'aria-pressed': String(review === 'true_positive'), title: review === 'true_positive' ? 'Etiketi geri almak için tekrar tıkla' : null, onclick: () => label(e, 'true_positive') }, icon('zap', 14, 2.2), 'Saldırı, kaçırıldı'))
+          : null));
+}
+
+/** Label wording: a below-threshold text is "harmless" or "missed attack", a detection is a true or false positive. */
+function reviewText(e, review, yes, no, open) {
+  if (isReview(e)) return review === 'true_positive' ? 'Kaçırılan saldırı' : review === 'false_positive' ? 'Zararsız' : open;
+  return review === 'true_positive' ? yes : review === 'false_positive' ? no : e.excerpt ? open : '—';
 }
 
 function renderEvents() {
@@ -1026,11 +1042,11 @@ function serverBars(ml) {
 
 function renderMl() {
   const d = derive();
-  const { config, ml, labels } = d;
+  const { config, ml, reviews, labels } = d;
   const threshold = config.ml?.threshold ?? 0.9;
   const tp = ml.filter((e) => labels[e.id] === 'true_positive');
   const fp = ml.filter((e) => labels[e.id] === 'false_positive');
-  const groups = [['all', 'Tümü', ml], ['pending', 'Etiket bekleyen', d.pending], ['true_positive', 'Doğru tespit', tp], ['false_positive', 'Yanlış pozitif', fp]];
+  const groups = [['all', 'Tümü', ml], ['pending', 'Etiket bekleyen', d.pending], ['review', 'Eşik altı', reviews], ['true_positive', 'Doğru tespit', tp], ['false_positive', 'Yanlış pozitif', fp]];
   const [, groupLabel, members] = groups.find(([k]) => k === state.mlFilter) ?? groups[0];
   const list = [...members].sort((a, b) => b.score - a.score);
   if (!list.some((e) => e.id === state.selectedId)) state.selectedId = list[0]?.id ?? null;
@@ -1063,7 +1079,7 @@ function renderMl() {
     h('div', { class: 'ml-grid' },
       h('article', { class: 'card' },
         h('div', { class: 'card-head' }, h('span', { class: 'card-title' }, 'Skor dağılımı'), h('span', { class: 'spacer' }),
-          h('span', { class: 'card-sub' }, 'Eşik altı skorlar loglanmaz')),
+          h('span', { class: 'card-sub' }, reviews.length ? `${reviews.length} eşik altı metin etiket için kayıtlı` : 'Eşik altı skorlar loglanmaz (ml.review ile açılır)')),
         h('div', { class: 'hist' }, scoreHistogram(ml, threshold))),
       h('article', { class: 'card' },
         h('div', { class: 'card-head' }, h('span', { class: 'card-title' }, 'Sunuculara göre'), h('span', { class: 'spacer' }),
@@ -1081,7 +1097,7 @@ function renderMl() {
               tile(e, 32),
               h('div', { style: { minWidth: '0' } }, h('div', { class: 'p-id' }, `# ${evId(e)}`), h('div', { class: 'p-sub' }, `${subject(e)} · ${e.server ?? '—'} · ${rel(e.ts)}`)),
               h('div', { class: 'p-side' }, h('span', { class: 'badge' }, e.score.toFixed(3)),
-                h('span', { class: 'p-cat' }, labels[e.id] === 'true_positive' ? 'Doğru' : labels[e.id] === 'false_positive' ? 'Yanlış poz.' : e.excerpt ? 'Bekliyor' : '—')))))
+                h('span', { class: 'p-cat' }, reviewText(e, labels[e.id], 'Doğru', 'Yanlış poz.', 'Bekliyor'))))))
           : h('div', { class: 'empty' }, h('b', {}, 'Olay yok'), 'Başka bir filtre seç.')),
       detailPane(selected, labels)));
 }

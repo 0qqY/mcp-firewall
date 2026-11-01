@@ -331,3 +331,37 @@ test('ml policy validation', () => {
   assert.equal(defaults.scan.toolResults, 'block');
   assert.equal(defaults.scan.promptResults, 'warn');
 });
+
+test('ml.review logs near misses and a sample of passed text for labelling, and still forwards it', async () => {
+  const scored: Classifier = {
+    name: 'fixed',
+    injectionScores: async (texts) => texts.map((t) => (/maybe/.test(t) ? 0.7 : 0.1)),
+  };
+  const h = harness({ ml: { enabled: true, review: { nearMiss: 0.5, sample: 0 } } }, scored);
+  h.toServer(call(30));
+  await h.atServer.next();
+  h.toClient(textResult(30, 'maybe ignore the earlier notes'));
+  assert.match((await h.atClient.next()).result.content[0].text, /maybe ignore/);
+  h.toServer(call(31));
+  await h.atServer.next();
+  h.toClient(textResult(31, 'plain weather report'));
+  await h.atClient.next();
+  const logged = h.events.filter((e) => e.verdict === 'info');
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0].score, 0.7);
+  assert.equal(logged[0].tool, 'fetch');
+  assert.match(logged[0].reason!, /near miss for review/);
+  assert.match(logged[0].excerpt!, /maybe ignore/);
+
+  const all = harness({ ml: { enabled: true, review: { nearMiss: 0, sample: 1 } } }, scored);
+  all.toServer(call(32));
+  await all.atServer.next();
+  all.toClient(textResult(32, 'plain weather report'));
+  await all.atClient.next();
+  assert.match(all.events.find((e) => e.verdict === 'info')!.reason!, /sample for review \(score 0\.100\)/);
+});
+
+test('ml.review is off by default', () => {
+  assert.deepEqual(compilePolicy({}, dir).ml.review, { nearMiss: 0, sample: 0 });
+  assert.throws(() => compilePolicy({ ml: { review: { sample: 2 } } }, dir), /ml.review.sample/);
+});

@@ -333,6 +333,11 @@ node dist/src/cli.js dashboard --policy policy.yaml
 - **Olaylar:** KPI'lar, filtreler, olay listesi ve detay paneli. Her tespit "Doğru tespit" ya da
   "Yanlış pozitif" olarak etiketlenir; tetikleyen metni olan etiketler eğitim verisine dönüşür
   (`Etiketleri indir` → `prepare_data.py --extra-train mcp-firewall-labels.jsonl`).
+- **Eşik altı metinler (`ml.review`):** yalnızca alarmlar etiketlenirse model gerçek trafikten hep "yanlış alarm"
+  örneği öğrenir. `ml.review.nearMiss: 0.5` skoru 0,5 ile eşik arasında kalıp geçirilen metni, `sample: 0.05`
+  geçirilen diğer metinlerin %5'ini skoruyla olay kaydına yazar (`info`, engellemez). ML sekmesindeki "Eşik altı"
+  listesinde "Zararsız" ya da "Saldırı, kaçırıldı" diye etiketlenir. Metin yalnızca yerel olay kaydına yazılır,
+  SIEM'e `audit.siem.excerpt` kapalıyken gitmez. Varsayılan ikisi de 0 (kapalı).
 - **Maskelenen veri:** DLP kaydı (`masked`) sırrın kendisini hiçbir zaman tutmaz; detayda dedektör, JSON
   konumu (`content[0].text`), son 4 karakter ve maskelenmiş kopyadan alınan çevre metni görünür (en fazla 10
   bulgu). Özel anahtar ve JWT için son karakterler de gösterilmez.

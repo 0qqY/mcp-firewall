@@ -94,6 +94,11 @@ export interface Policy {
       promptResults: 'block' | 'warn' | 'off';
       serverRequests: 'block' | 'warn' | 'off';
     };
+    /**
+     * Logs text the model let through, with its score, so it can be labelled in the panel: everything scoring at
+     * least `nearMiss` (0 = off) and a random `sample` share (0..1) of the rest. The text stays in the local audit file.
+     */
+    review: { nearMiss: number; sample: number };
   };
 }
 
@@ -320,6 +325,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
   const approval = obj(root.approval, 'approval');
   const ml = obj(root.ml, 'ml');
   const mlScan = obj(ml.scan, 'ml.scan');
+  const mlReview = obj(ml.review, 'ml.review');
   if (ml.injectionLabel !== undefined && typeof ml.injectionLabel !== 'string') throw new PolicyError('ml.injectionLabel: expected a string');
 
   const rules = tools.rules ?? [];
@@ -416,6 +422,10 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
         toolResults: oneOf(mlScan.toolResults, ['block', 'warn', 'off'] as const, 'block', 'ml.scan.toolResults'),
         promptResults: oneOf(mlScan.promptResults, ['block', 'warn', 'off'] as const, 'warn', 'ml.scan.promptResults'),
         serverRequests: oneOf(mlScan.serverRequests, ['block', 'warn', 'off'] as const, 'block', 'ml.scan.serverRequests'),
+      },
+      review: {
+        nearMiss: num(mlReview.nearMiss, 0, 0, 1, 'ml.review.nearMiss'),
+        sample: num(mlReview.sample, 0, 0, 1, 'ml.review.sample'),
       },
     },
   };

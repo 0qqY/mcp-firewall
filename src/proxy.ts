@@ -732,6 +732,11 @@ export class FirewallProxy {
         if (s.score >= ml.threshold) {
           return { reason: `ML classifier flagged possible prompt injection (score ${s.score.toFixed(3)})`, score: s.score, excerpt: s.excerpt };
         }
+        const { nearMiss, sample } = ml.review;
+        const review = nearMiss > 0 && s.score >= nearMiss ? 'near miss' : sample > 0 && Math.random() < sample ? 'sample' : '';
+        if (review && s.excerpt) {
+          this.audit.record({ ...ctx, verdict: 'info', reason: `ML ${review} for review (score ${s.score.toFixed(3)})`, score: s.score, excerpt: s.excerpt });
+        }
         if (s.truncated) {
           const reason = `text too long to scan fully: only the first and last ${ml.maxChunks} chunks were checked`;
           if (ml.onTruncated === 'block') return { reason };
