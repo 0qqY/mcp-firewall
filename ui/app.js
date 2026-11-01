@@ -789,17 +789,19 @@ function mlCard({ config, ml, labels, events }) {
     labelsLink('btn-dark btn-block', { events, labels }));
 }
 
-function promoCard({ pending }) {
-  const art = h('svg:svg', { width: 150, height: 96, viewBox: '0 0 150 96', fill: 'none', stroke: 'var(--peach-ink)', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' },
+/** `wide`: the one-row banner on the overview; otherwise the tall card. */
+function promoCard({ pending }, wide = false) {
+  const art = h('svg:svg', { width: wide ? 94 : 150, height: wide ? 60 : 96, viewBox: '0 0 150 96', fill: 'none', stroke: 'var(--peach-ink)', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' },
     h('svg:path', { d: 'M48 14 22 24v20c0 18 11 28 26 32 15-4 26-14 26-32V24z' }),
     h('svg:path', { d: 'm37 45 8 8 15-16' }),
     h('svg:rect', { x: 92, y: 40, width: 32, height: 32, rx: 6 }),
     h('svg:rect', { x: 101, y: 49, width: 14, height: 14, rx: 2 }),
     h('svg:path', { d: 'M100 40v-7M108 40v-7M116 40v-7M100 72v7M108 72v7M116 72v7M92 48h-7M92 56h-7M92 64h-7M124 48h7M124 56h7M124 64h7' }),
     h('svg:path', { d: 'M80 18l2 5 5 2-5 2-2 5-2-5-5-2 5-2zM136 22l1.5 3.5L141 27l-3.5 1.5L136 32l-1.5-3.5L131 27l3.5-1.5z' }));
-  return h('article', { class: 'card promo' },
+  const br = wide ? ' ' : h('br');
+  return h(wide ? 'section' : 'article', { class: `card promo${wide ? ' wide' : ''}`, 'aria-label': wide ? 'Modeli güçlendir' : null },
     h('div', {},
-      h('h2', {}, 'Modeli güçlendir:', h('br'), h('span', { class: 'ring' }, `${pending.length} olay`), ' etiket', h('br'), 'bekliyor'),
+      h('h2', {}, 'Modeli güçlendir:', br, h('span', { class: 'ring' }, `${pending.length} olay`), ' etiket', wide ? ' ' : h('br'), 'bekliyor'),
       h('p', {}, 'Etiketlediğin olaylar prepare_data.py --extra-train ile eğitim setine eklenir.')),
     h('div', { class: 'art' }, art),
     h('button', { class: 'btn-white', onclick: () => setView('ml', { mlFilter: 'pending', selectedId: null }) }, 'İncele'));
@@ -808,7 +810,7 @@ function promoCard({ pending }) {
 // Each top tab fits one screen: servers and counts first, then the latest events, then the analysis cards.
 function renderOverview() {
   const d = derive();
-  document.getElementById('view-overview').replaceChildren(serverList(), statsRow(d), lineMap(d));
+  document.getElementById('view-overview').replaceChildren(serverList(), statsRow(d), h('div', { class: 'wrap' }, promoCard(d, true)), lineMap(d));
 }
 
 function renderRecent() {
@@ -822,7 +824,7 @@ function renderRecent() {
 function renderAnalysis() {
   const d = derive();
   document.getElementById('view-analysis').replaceChildren(
-    h('div', { class: 'wrap' }, h('div', { class: 'ov-extra' }, radarCard(d), quickCard(d), mlCard(d), promoCard(d))));
+    h('div', { class: 'wrap' }, h('div', { class: 'ov-extra' }, radarCard(d), quickCard(d), mlCard(d))));
 }
 
 // ---------- event center ----------
