@@ -401,3 +401,20 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     tur 1'deki "başlık + içerik" yanlış alarmını da geri getirdi. Varsayılan değişmedi: soup04-ab4. Dört turun dersi:
     bu kılıf verisiyle tek bir alfa-0.4 çorbası hem Türkçe isabeti hem Türkçe FPR'ı birlikte iyileştirmiyor; sıradaki
     fırsat gerçek olay kaydı etiketleri (şu an 0).
+75. **Gerçek olay etiketleri ve `ml.review` (01.11.2026):** Gerçek olay kaydındaki 33 ML tespitinin hepsi yanlış alarmdı
+    (base64 resimler, GitHub araç tanımları, GitHub hata mesajları, bu deponun README/test/commit metinleri, bir CSS
+    sayfası) ve öyle etiketlendi. Kayıtta yalnızca alarm veren metin tutulduğu için etiket sayısı sınırlıydı:
+    `ml.review.nearMiss` skoru eşiğin altında kalıp geçirilen metni, `ml.review.sample` geçirilen trafikten bir payı
+    skoruyla kayda yazar (`info`); panelin ML sekmesinde "Eşik altı" listesi ve "Zararsız" / "Saldırı, kaçırıldı"
+    etiketleri eklendi. Ardından gerçek filesystem, fetch ve git sunucuları üzerinden tatbikat yapıldı: eğitim
+    tarafındaki red team satırlarından 90 metin (değerlendirme setlerine dokunulmadı) dosya, yerel web sayfası ve
+    commit mesajı olarak okutuldu; 79 olay bilinen doğruya göre etiketlendi. Toplam 112 etiket: 33 doğru tespit,
+    79 yanlış alarm. Tatbikat metinleri ab4'ün kaçırdığı ve yanlış alarm verdiği zor örneklerdi; yerel web sunucusunun
+    8765 portu WSL'e ait çıktı, 18765 kullanıldı.
+76. **Panel tek ekran sekmeleri (01.11.2026):** Ana sayfa üç sekmeye bölündü: Genel bakış (MCP sunucuları, sayılar,
+    küçültülmüş 12 saatlik şerit), Son olaylar (son 8 tespit ve detay), Analiz (dağılım, eşik simülasyonu, ML katmanı,
+    etiket bekleyenler). 1440×900 ve 1366×768'de üçü de kaydırmadan sığıyor; mobilde menü tek satır, yatay kayıyor.
+77. **Masaüstü bildirimi (01.11.2026):** Engelleme yalnızca modele hata olarak dönüyordu; kullanıcı görmüyordu.
+    `audit.notify` ile firewall engellediği anda masaüstü bildirimi gösteriyor (Windows bildirimi, macOS osascript,
+    Linux notify-send). 30 saniye içindeki ardışık engellemeler tek özet bildirim oluyor. Metin ortam değişkeniyle
+    geçiyor, komut satırına girmiyor. Varsayılan kapalı; kullanıcının iki politikasında açıldı. 167/167 test.

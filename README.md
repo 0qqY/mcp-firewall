@@ -275,6 +275,25 @@ sunucularda `warn` veya `off` kullanılmalı.
 | `src/audit.ts` | JSONL audit log |
 | `src/siem.ts` | Audit kayıtlarını syslog (UDP/TCP/TLS) ve OTLP/HTTP ile SIEM'e gönderme |
 
+## Masaüstü bildirimi
+
+Engellenen bir tool sonucu modele hata olarak döner; kullanıcı bunu ancak model söylerse öğrenir. `audit.notify`
+açıkken firewall engellediği anda masaüstü bildirimi gösterir (Windows bildirimi, macOS `osascript`, Linux
+`notify-send`; ek paket gerekmez):
+
+```yaml
+audit:
+  notify:
+    enabled: true
+    on: [block]          # block, would_block, redact, would_redact, warn
+    quietSeconds: 30     # ilk bildirimden sonra 30 sn içindekiler tek özet bildirim olur
+```
+
+Bildirimde sunucu, tool ve kısa Türkçe neden ("olası prompt enjeksiyonu", "hassas veri", "araç tanımı onaydan
+sonra değişti") ile panel adresi yer alır; tool metni ya da yakalanan veri yer almaz. Başlık ve metin komut satırına
+değil ortam değişkenine konur, sunucudan gelen bir ad komut olarak çalışamaz. Varsayılan kapalı (CI'da açılır
+pencere olmasın diye).
+
 ## SIEM'e gönderme (syslog / OTLP)
 Audit kayıtlarının bir kopyası merkezi bir log sistemine (Splunk, Elastic, Graylog, Wazuh, Sentinel ya da bir
 OpenTelemetry toplayıcısı) gönderilebilir. JSONL dosyası her durumda yazılmaya devam eder.

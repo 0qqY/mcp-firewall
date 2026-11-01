@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import spawn from 'cross-spawn';
 import { AuditLog } from './audit.js';
 import { openSinks } from './siem.js';
+import { DesktopNotifier } from './notify.js';
 import { startDashboard } from './dashboard/server.js';
 import type { Classifier } from './ml/classifier.js';
 import { loadTransformersClassifier } from './ml/transformers.js';
@@ -124,11 +125,12 @@ function runDashboard(argv: string[]): void {
   });
 }
 
-/** The audit log with the policy's SIEM sinks; they never hold up or stop the firewall. */
+/** The audit log with the policy's SIEM sinks and desktop notifier; they never hold up or stop the firewall. */
 function openAudit(policy: Policy, serverId: string): AuditLog {
   const siem = policy.audit.siem;
-  const sinks = openSinks(siem, (message) => process.stderr.write(`mcp-firewall: ${message}
-`));
+  const sinks = [...openSinks(siem, (message) => process.stderr.write(`mcp-firewall: ${message}
+`))];
+  if (policy.audit.notify.enabled) sinks.push(new DesktopNotifier(policy.audit.notify));
   return new AuditLog(policy.audit.enabled ? policy.audit.file : undefined, policy.audit.logAllowed, serverId, process.stderr, {
     sinks,
     logAllowed: siem?.logAllowed ?? false,

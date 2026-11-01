@@ -28,10 +28,22 @@ export interface ToolRule {
   paths?: PathConstraint;
 }
 
+/** Desktop notifications for the user, who otherwise learns of a block only if the model mentions it. */
+export interface NotifyConfig {
+  enabled: boolean;
+  /** Verdicts that raise a notification. */
+  on: NotifyVerdict[];
+  /** After a notification, further ones are gathered for this long and shown as one summary. */
+  quietSeconds: number;
+}
+
+export const NOTIFY_VERDICTS = ['block', 'would_block', 'redact', 'would_redact', 'warn'] as const;
+export type NotifyVerdict = (typeof NOTIFY_VERDICTS)[number];
+
 export interface Policy {
   mode: Mode;
   /** `siem`: copies of the records sent to syslog or an OpenTelemetry collector, independent of `enabled`. */
-  audit: { enabled: boolean; file: string; logAllowed: boolean; siem?: SiemConfig };
+  audit: { enabled: boolean; file: string; logAllowed: boolean; siem?: SiemConfig; notify: NotifyConfig };
   tools: { default: Action; rules: ToolRule[] };
   methods: { deny: RegExp[] };
   descriptionScan: { enabled: boolean; action: 'hide' | 'warn'; patterns: RegExp[]; hiddenUnicode: boolean };
@@ -204,6 +216,17 @@ function url(v: unknown, protocols: string[], path: string): URL {
   return u;
 }
 
+function compileNotify(raw: unknown): NotifyConfig {
+  const n = obj(raw, 'audit.notify');
+  const on = strList(n.on, 'audit.notify.on') ?? ['block'];
+  for (const v of on) oneOf(v, NOTIFY_VERDICTS, 'block', 'audit.notify.on');
+  return {
+    enabled: bool(n.enabled, false, 'audit.notify.enabled'),
+    on: on as NotifyVerdict[],
+    quietSeconds: num(n.quietSeconds, 30, 0, 3600, 'audit.notify.quietSeconds'),
+  };
+}
+
 function compileSiem(raw: unknown, baseDir: string): SiemConfig | undefined {
   if (raw === undefined) return undefined;
   const s = obj(raw, 'audit.siem');
@@ -358,6 +381,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
       file: filePath(audit.file, 'mcp-firewall-audit.jsonl', baseDir, 'audit.file'),
       logAllowed: bool(audit.logAllowed, true, 'audit.logAllowed'),
       siem: compileSiem(audit.siem, baseDir),
+      notify: compileNotify(audit.notify),
     },
     tools: {
       default: oneOf(tools.default, ['allow', 'deny', 'ask'] as const, 'allow', 'tools.default'),
