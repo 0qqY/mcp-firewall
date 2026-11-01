@@ -24,7 +24,7 @@ writeFileSync(
 
 let server: ReturnType<typeof startDashboard>;
 before(async () => {
-  server = startDashboard({ policy: compilePolicy({}, dir), auditFile, labelsFile, port: PORT });
+  server = startDashboard({ policy: compilePolicy({}, dir), auditFile, labelsFile, port: PORT, clientConfigs: [] });
   await new Promise((resolve) => server.once('listening', resolve));
   assert.equal((server.address() as AddressInfo).address, '127.0.0.1');
 });
@@ -81,4 +81,10 @@ test('only whitelisted static files are served, with a CSP', async () => {
   const page = await fetch(`${base}/`);
   assert.match(page.headers.get('content-security-policy') ?? '', /default-src 'self'/);
   assert.equal((await fetch(`${base}/package.json`)).status, 404);
+});
+
+test('/api/servers lists servers with a risk score', async () => {
+  const { servers } = (await (await fetch(`${base}/api/servers`)).json()) as { servers: { name: string; score: number; level: string }[] };
+  assert.deepEqual(servers.map((s) => s.name).sort(), ['fs', 'gh']);
+  for (const s of servers) assert.ok(s.score >= 0 && s.score <= 100 && ['low', 'medium', 'high'].includes(s.level));
 });

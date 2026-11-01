@@ -305,6 +305,52 @@ mark.redacted::before { content: "◆ "; }
 .text-dialog .text-dialog-status:empty { display: none; }
 .text-dialog-act { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .btn-ghost-dark { background: none; border: 2px solid var(--line); color: var(--ink); border-radius: 999px; padding: 9px 18px; font-weight: 700; }
+/* MCP servers: risk badge shape + word, never colour alone (high square, medium hollow diamond-ish ring, low circle). */
+.srv-sec { padding-top: 32px; }
+.srv-empty { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 24px; color: var(--ink-2); }
+.srv-empty b { color: var(--ink); }
+.srv-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+.srv { width: 100%; height: 100%; text-align: left; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 16px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
+.srv:hover { border-color: var(--ink); }
+.srv.high { box-shadow: inset 6px 0 0 var(--red); }
+.srv.medium { box-shadow: inset 6px 0 0 var(--amber); }
+.srv-body { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.srv-name { flex: 1 1 100%; font-weight: 900; font-size: 22px; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srv-facts { font-size: 14px; color: var(--muted); }
+.srv-top { flex: 1 1 100%; font-size: 15px; color: var(--ink-2); }
+.risk { flex: none; width: 64px; height: 64px; display: grid; place-items: center; font-weight: 900; font-size: 28px; font-variant-numeric: tabular-nums; border-radius: 50%; background: var(--green); color: #fff; }
+.risk.blk { background: var(--red); border-radius: 12px; }
+.risk.wrn { background: #fdf0cc; color: #5c3d00; box-shadow: inset 0 0 0 4px var(--amber); border-radius: 18px; }
+.risk.big { width: 84px; height: 84px; font-size: 38px; }
+.srv-dialog { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
+.srv-d-head { display: flex; gap: 18px; align-items: flex-start; margin-bottom: 8px; }
+.srv-d-head h2 { font-size: 26px; overflow-wrap: anywhere; }
+.srv-d-head .vd { margin: 2px 0 8px; }
+.srv-dialog .srv-target { font: 13px/1.5 var(--mono); color: var(--ink-2); overflow-wrap: anywhere; margin: 0 0 4px; }
+.srv-dialog .srv-sub { font-size: 13px; color: var(--muted); margin: 0; overflow-wrap: anywhere; }
+.srv-dialog h3 { font-size: 18px; font-weight: 900; margin: 22px 0 10px; }
+.factors { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.factors li { border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+.f-head { display: flex; gap: 12px; align-items: baseline; margin-bottom: 6px; }
+.f-head b { flex: 1; font-size: 17px; }
+.f-pts { font-weight: 900; font-size: 17px; font-variant-numeric: tabular-nums; color: var(--red); }
+.srv-dialog .factors p { margin: 0 0 8px; }
+.srv-dialog .f-fix { color: var(--ink); }
+.f-snip { display: flex; gap: 10px; align-items: flex-start; }
+.f-snip pre { flex: 1; min-width: 0; align-self: stretch; user-select: text; white-space: pre; overflow-x: auto; }
+.f-snip .btn-ghost-dark { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; font-size: 14px; }
+.good { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.good li { display: flex; gap: 8px; align-items: center; font-size: 15px; }
+.good svg { color: var(--green); flex: none; }
+.srv-tools { margin: 0; display: grid; gap: 8px; font-size: 14px; }
+.srv-tools-row { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; }
+.srv-tools dt { color: var(--muted); }
+.srv-tools dd { margin: 0; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .srv-d-head { flex-direction: column; }
+  .f-snip { flex-direction: column; }
+  .srv-tools-row { grid-template-columns: 1fr; gap: 2px; }
+}
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 12px 20px; border-radius: 999px; font-size: 15px; font-weight: 700; z-index: 20; max-width: calc(100vw - 32px); }
 
 /* The route column gets narrow long before the page does: stack reason under the tool name. */

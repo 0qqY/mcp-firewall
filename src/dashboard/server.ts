@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AuditEvent } from '../audit.js';
 import type { Policy } from '../policy.js';
+import { defaultClientConfigs, inventory } from './inventory.js';
 
 const UI_DIR = fileURLToPath(new URL('../../../ui/', import.meta.url));
 const STATIC: Record<string, [file: string, type: string]> = {
@@ -44,6 +45,8 @@ export interface DashboardOptions {
   auditFile: string;
   labelsFile: string;
   port: number;
+  /** MCP client config files to list servers from, as [file, client name]; default: Claude Code and Claude Desktop. */
+  clientConfigs?: [string, string][];
 }
 
 /** Maps an audit reason to the threat category shown in the dashboard. */
@@ -119,6 +122,7 @@ function readBody(req: IncomingMessage): Promise<string> {
  */
 export function startDashboard(opts: DashboardOptions): Server {
   const { policy, auditFile, labelsFile, port } = opts;
+  const clientConfigs = opts.clientConfigs ?? defaultClientConfigs();
   const origins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
   const hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
 
@@ -144,6 +148,10 @@ export function startDashboard(opts: DashboardOptions): Server {
         const events = server ? all.filter((e) => e.server === server) : all;
         const labels = Object.fromEntries([...readLabels(labelsFile)].map(([id, l]) => [id, l.review]));
         return json(res, 200, { config, servers: [...new Set(all.map((e) => e.server).filter(Boolean))].sort(), events, labels });
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/servers') {
+        return json(res, 200, { servers: inventory({ configFiles: clientConfigs, events: readAudit(auditFile), fallbackPolicy: policy }) });
       }
 
       if (req.method === 'POST' && url.pathname === '/api/labels') {

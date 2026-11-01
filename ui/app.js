@@ -422,11 +422,14 @@ async function load() {
     if (!res.ok) throw new Error(res.statusText);
     const data = await res.json();
     data.events = data.events.map(localize);
+    // The server list reads client configs and pin files; a failure there must not stop the event view.
+    data.inventory = await fetch('/api/servers', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((r) => r?.servers ?? null).catch(() => null);
     state.lastRead = new Date();
     live.classList.remove('stale');
     renderStatus(data.config);
     const last = data.events.at(-1);
-    const signature = `${state.server}|${data.events.length}|${last?.id}|${Object.keys(data.labels).length}`;
+    const risks = (data.inventory ?? []).map((s) => `${s.name}:${s.score}`).join(',');
+    const signature = `${state.server}|${data.events.length}|${last?.id}|${Object.keys(data.labels).length}|${risks}`;
     state.data = data;
     if (signature !== state.signature) {
       state.signature = signature;
@@ -516,6 +519,84 @@ function renderFoot() {
 }
 
 // ---------- overview ----------
+
+const LEVELS = {
+  high: { label: 'Yüksek risk', cls: 'blk' },
+  medium: { label: 'Orta risk', cls: 'wrn' },
+  low: { label: 'Düşük risk', cls: 'ok' },
+};
+
+/** The MCP servers the clients on this machine know, riskiest first; a card opens the reasons and fixes. */
+function serverList() {
+  const list = state.data?.inventory;
+  const body = !list
+    ? h('p', { class: 'srv-empty' }, list === null ? 'Sunucu listesi okunamadı.' : 'Yükleniyor…')
+    : !list.length
+      ? h('p', { class: 'srv-empty' }, h('b', {}, 'Bu makinede MCP sunucusu bulunamadı.'), ' Claude Code ve Claude Desktop ayar dosyalarına bakıldı.')
+      : h('ul', { class: 'srv-grid' }, list.map((s) => {
+        const lv = LEVELS[s.level];
+        const top = s.factors[0];
+        const facts = [
+          s.firewalled ? "firewall'da" : 'korumasız',
+          s.tools.total ? `${s.tools.total} araç` : null,
+          s.week.blocked ? `7 günde ${s.week.blocked} engel` : null,
+        ].filter(Boolean).join(' · ');
+        return h('li', {},
+          h('button', { class: `srv ${s.level}`, onclick: () => serverDialog(s), 'aria-label': `${s.name}, risk puanı ${s.score}, ${lv.label}. Ayrıntılar` },
+            h('span', { class: `risk ${lv.cls}` }, String(s.score)),
+            h('span', { class: 'srv-body' },
+              h('span', { class: 'srv-name' }, s.name),
+              h('span', { class: `vd ${lv.cls}` }, lv.label),
+              h('span', { class: 'srv-facts' }, facts),
+              h('span', { class: 'srv-top' }, top ? top.title : 'Belirgin bir risk bulunmadı')),
+            icon('arrowRight', 18)));
+      }));
+  return h('section', { class: 'wrap srv-sec', 'aria-labelledby': 'sunucular' },
+    h('div', { class: 'sec-h' },
+      h('h2', { id: 'sunucular' }, 'MCP sunucuların'),
+      h('p', {}, list?.length ? 'Puan 0–100; yüksek olan daha riskli. Neden yüksek olduğunu ve nasıl düşürüleceğini görmek için bir sunucuya tıkla.' : '')),
+    body);
+}
+
+function serverDialog(s) {
+  document.getElementById('srv-dialog')?.remove();
+  const close = () => { if (dialog.open) dialog.close(); dialog.remove(); };
+  const lv = LEVELS[s.level];
+  const toolLine = (label, names) => (names.length ? h('div', { class: 'srv-tools-row' }, h('dt', {}, label), h('dd', {}, names.join(', '))) : null);
+  const dialog = h('dialog', { id: 'srv-dialog', class: 'text-dialog srv-dialog', 'aria-labelledby': 'srv-dialog-title', onclose: close },
+    h('div', { class: 'srv-d-head' },
+      h('span', { class: `risk big ${lv.cls}` }, String(s.score)),
+      h('div', {},
+        h('h2', { id: 'srv-dialog-title' }, s.name),
+        h('span', { class: `vd ${lv.cls}` }, lv.label),
+        h('p', { class: 'srv-target' }, s.target || '—'),
+        h('p', { class: 'srv-sub' }, [s.clients.length ? s.clients.join(', ') : null, s.policyFile ? `politika: ${s.policyFile}` : null].filter(Boolean).join(' · ')))),
+    s.factors.length
+      ? [h('h3', {}, 'Puanı yükseltenler'),
+        h('ol', { class: 'factors' }, s.factors.map((f) => h('li', {},
+          h('div', { class: 'f-head' }, h('b', {}, f.title), h('span', { class: 'f-pts' }, `+${f.points}`)),
+          h('p', {}, f.why),
+          h('p', { class: 'f-fix' }, h('strong', {}, 'Nasıl düşer: '), f.fix),
+          f.snippet ? h('div', { class: 'f-snip' }, h('pre', {}, f.snippet),
+            h('button', { class: 'btn-ghost-dark', onclick: () => copy(f.snippet, 'Panoya kopyalandı') }, icon('copy', 14), 'Kopyala')) : null)))]
+      : h('p', {}, 'Bu sunucu için puanı yükselten bir şey bulunmadı.'),
+    s.good.length ? [h('h3', {}, 'İyi olanlar'), h('ul', { class: 'good' }, s.good.map((g) => h('li', {}, icon('check', 15), g)))] : null,
+    s.tools.total ? [h('h3', {}, `Araçlar (${s.tools.total})`), h('dl', { class: 'srv-tools' },
+      toolLine('Onaysız silme', s.tools.destructive),
+      toolLine('Onaysız komut/kod', s.tools.exec),
+      toolLine('Onaysız yazma', s.tools.write),
+      toolLine('Okuma', s.tools.read),
+      toolLine('Onay istiyor', s.tools.asked),
+      toolLine('Kapalı', s.tools.denied))] : null,
+    h('div', { class: 'text-dialog-act' },
+      h('button', { class: 'btn-ghost-dark', onclick: close }, 'Kapat'),
+      s.week.detections || s.week.blocked
+        ? h('button', { class: 'btn-dark', onclick: () => { close(); state.server = s.name; setView('events', { tab: 'detections', selectedId: null, category: '', q: '', since: null }); selectServer(s.name); } }, 'Olaylarını göster')
+        : null));
+  dialog.addEventListener('click', (ev) => { if (ev.target === dialog) close(); });
+  document.body.append(dialog);
+  dialog.showModal();
+}
 
 function statsRow({ events }) {
   const day = events.filter((e) => ago(e.ts) < DAY);
@@ -717,6 +798,7 @@ function renderOverview() {
   const recent = d.detections.slice(-8).reverse();
   const selected = recent.find((e) => e.id === state.overviewId) ?? recent[0];
   document.getElementById('view-overview').replaceChildren(
+    serverList(),
     statsRow(d),
     lineMap(d),
     h('div', { class: 'wrap' },

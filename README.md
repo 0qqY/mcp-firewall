@@ -321,6 +321,13 @@ node dist/src/cli.js dashboard --policy policy.yaml
 
 `http://127.0.0.1:4747` adresinde audit logunu canlı (5 sn) gösteren yerel bir panel açar:
 
+- **MCP sunucuların:** ana sayfanın en üstünde, bu makinedeki MCP sunucuları (Claude Code'un genel ve proje
+  ayarları, Claude Desktop) ve yalnızca olay kaydında görülenler, 0–100 risk puanıyla, en riskli önce. Puan
+  firewall'un gördüklerinden çıkar: sunucu firewall'un arkasında mı, kendi politikası (mod, ML, DLP, sabitleme,
+  taint), sabitlenen araçların adlarından okuma/yazma/silme/komut yetenekleri ve hangilerinin onaysız açık olduğu,
+  kod sürümünün sabitliği (digest, tam sürüm), ayar dosyasında düz metin anahtar, onay bekleyen araç değişiklikleri
+  ve son 7 günün engellenen saldırıları. Karta tıklayınca her maddenin nedeni, puanı nasıl düşüreceği ve
+  kopyalanabilir YAML ya da komut görünür. Anahtar değerleri hiçbir zaman gösterilmez, yalnızca adları.
 - **Genel bakış:** son 24 saatin sayıları (tıklayınca ilgili olay listesi açılır), saatlik tespitler,
   son olaylar ve seçili olayın detayı, kategori dağılımı, ML eşiği simülasyonu, ML katmanı durumu.
 - **Olaylar:** KPI'lar, filtreler, olay listesi ve detay paneli. Her tespit "Doğru tespit" ya da

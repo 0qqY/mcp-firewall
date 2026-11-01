@@ -371,3 +371,16 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     0.05 → 0.99). Sıkı tarif bunu düzeltti ama yanlış alarmların ağırlığı saldırı isabetini düşürdü. Hiçbir aday
     varsayılanı geçmedi; soup04-ab4 kaldı. Sonraki deneme için: sıkı tarife Türkçe saldırıların kılıflı ikizleri
     eklenmeli (yalnızca Türkçe isabet düştü), yanlış alarm satırları daha az ağırlıkla.
+72. **Panelde MCP sunucuları ve risk puanı (01.11.2026):** Ana sayfanın en üstüne "MCP sunucuların" bölümü eklendi
+    (`src/dashboard/inventory.ts`, `GET /api/servers`). Liste Claude Code (`~/.claude.json`, genel ve proje) ve Claude
+    Desktop ayarlarından, firewall ile sarılmış girişlerde `--name`/`--policy` ve `--` sonrasındaki asıl komut ayrılarak
+    kuruluyor; yalnızca olay kaydında görülen sunucular da ekleniyor. Her sunucu kendi politikası ve pin dosyasıyla
+    puanlanıyor (0–100; 30 altı düşük, 60 ve üstü yüksek). Maddeler: firewall dışında (+45), izleme modu (+20), onaysız
+    komut aracı (+20), ML kapalı (+15) ya da sonuçlarda engellemiyor (+10), onaysız silme (+15), okuma + dışarı yazma
+    varken taint kapalı (+15, "lethal trifecta"), onay bekleyen pin değişikliği (+15), DLP kapalı (+10), sabitleme
+    kapalı (+10), sabit olmayan sürüm (+10; etiketli imaj +5), düz metin anahtar (+10), son 7 günde engellenen saldırı
+    (+3..10), onaysız yazma araçları (+8), uzak sunucu (+5), yeni araçlara onaysız güven (+4). Geçmiş "rug pull"
+    olayları değil bekleyen değişiklikler sayılıyor: 28.10'daki outputSchema geçişinin 231 olayı onaylanmıştı. Gerçek
+    GitHub MCP 37 puan (orta): taint kapalı (+15), 33 engellenen saldırı (+10), 20 onaysız yazma aracı (+8), `onNew:
+    allow` (+4). 162/162 test.
+
