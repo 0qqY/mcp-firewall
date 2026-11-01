@@ -58,7 +58,7 @@ const DAYS = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
 const THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95];
 const DAY = 86400e3;
 
-const VIEWS = { overview: 'Genel bakış', events: 'Olaylar', ml: 'ML olayları' };
+const VIEWS = { overview: 'Genel bakış', recent: 'Son olaylar', analysis: 'Analiz', events: 'Olaylar', ml: 'ML olayları' };
 const EVENT_TABS = [['detections', 'Tespitler'], ['blocked', 'Engellenen'], ['masked', 'Maskelenen'], ['warn', 'Uyarılar'], ['allowed', 'İzin'], ['all', 'Tümü']];
 const MASKS = new Set(['redact', 'would_redact']);
 
@@ -657,7 +657,7 @@ function routeList(recent, selected) {
     recent.length
       ? h('ol', { class: 'route' }, recent.map((e) =>
         h('li', { class: e === selected ? 'on' : '' },
-          h('button', { 'aria-current': e === selected ? 'true' : null, title: e.reason ?? '', onclick: () => { state.overviewId = e.id; renderOverview(); } },
+          h('button', { 'aria-current': e === selected ? 'true' : null, title: e.reason ?? '', onclick: () => { state.overviewId = e.id; renderRecent(); } },
             h('span', { class: `mk ${verdict(e).cls}`, 'aria-hidden': 'true' }),
             h('span', { class: 'tm' }, clock(e.ts)),
             h('span', { class: 'tl' }, subject(e)),
@@ -805,17 +805,24 @@ function promoCard({ pending }) {
     h('button', { class: 'btn-white', onclick: () => setView('ml', { mlFilter: 'pending', selectedId: null }) }, 'İncele'));
 }
 
+// Each top tab fits one screen: servers and counts first, then the latest events, then the analysis cards.
 function renderOverview() {
+  const d = derive();
+  document.getElementById('view-overview').replaceChildren(serverList(), statsRow(d), lineMap(d));
+}
+
+function renderRecent() {
   const d = derive();
   const recent = d.detections.slice(-8).reverse();
   const selected = recent.find((e) => e.id === state.overviewId) ?? recent[0];
-  document.getElementById('view-overview').replaceChildren(
-    serverList(),
-    statsRow(d),
-    lineMap(d),
-    h('div', { class: 'wrap' },
-      h('div', { class: 'ov-main' }, routeList(recent, selected), signPanel(selected, d.labels)),
-      h('div', { class: 'ov-extra' }, radarCard(d), quickCard(d), mlCard(d), promoCard(d))));
+  document.getElementById('view-recent').replaceChildren(
+    h('div', { class: 'wrap' }, h('div', { class: 'ov-main' }, routeList(recent, selected), signPanel(selected, d.labels))));
+}
+
+function renderAnalysis() {
+  const d = derive();
+  document.getElementById('view-analysis').replaceChildren(
+    h('div', { class: 'wrap' }, h('div', { class: 'ov-extra' }, radarCard(d), quickCard(d), mlCard(d), promoCard(d))));
 }
 
 // ---------- event center ----------
@@ -1107,6 +1114,8 @@ function renderMl() {
 function render() {
   renderChrome();
   if (state.view === 'overview') renderOverview();
+  else if (state.view === 'recent') renderRecent();
+  else if (state.view === 'analysis') renderAnalysis();
   else if (state.view === 'ml') renderMl();
   else renderEvents();
   renderFoot();

@@ -13,6 +13,8 @@
       <div class="logo"><img src="/favicon.svg" alt="" width="38" height="38"><span>Tuuf MCP Firewall</span></div>
       <nav class="nav" aria-label="Ana menü">
         <button data-view="overview">Genel bakış</button>
+        <button data-view="recent">Son olaylar</button>
+        <button data-view="analysis">Analiz</button>
         <button data-view="events">Olaylar</button>
         <button data-view="ml">ML</button>
       </nav>
@@ -29,6 +31,8 @@
   <main>
     <h1 class="sr-only" id="title">Genel bakış</h1>
     <section class="view overview" id="view-overview" aria-label="Genel bakış"></section>
+    <section class="view overview" id="view-recent" aria-label="Son olaylar" hidden></section>
+    <section class="view overview" id="view-analysis" aria-label="Analiz" hidden></section>
     <section class="view wrap events" id="view-events" aria-label="Olaylar" hidden></section>
     <section class="view wrap mlv" id="view-ml" aria-label="ML olayları" hidden></section>
   </main>

@@ -328,8 +328,10 @@ node dist/src/cli.js dashboard --policy policy.yaml
   kod sürümünün sabitliği (digest, tam sürüm), ayar dosyasında düz metin anahtar, onay bekleyen araç değişiklikleri
   ve son 7 günün engellenen saldırıları. Karta tıklayınca her maddenin nedeni, puanı nasıl düşüreceği ve
   kopyalanabilir YAML ya da komut görünür. Anahtar değerleri hiçbir zaman gösterilmez, yalnızca adları.
-- **Genel bakış:** son 24 saatin sayıları (tıklayınca ilgili olay listesi açılır), saatlik tespitler,
-  son olaylar ve seçili olayın detayı, kategori dağılımı, ML eşiği simülasyonu, ML katmanı durumu.
+- **Genel bakış:** MCP sunucuları, son 24 saatin sayıları (tıklayınca ilgili olay listesi açılır) ve son 12
+  saatin tespit şeridi. Her üst sekme kaydırmadan tek ekrana sığar (1366×768 ve üstü).
+- **Son olaylar:** son 8 tespit ve seçili olayın detayı. **Analiz:** kategori dağılımı, ML eşiği simülasyonu,
+  ML katmanı durumu ve etiket bekleyen olaylar.
 - **Olaylar:** KPI'lar, filtreler, olay listesi ve detay paneli. Her tespit "Doğru tespit" ya da
   "Yanlış pozitif" olarak etiketlenir; tetikleyen metni olan etiketler eğitim verisine dönüşür
   (`Etiketleri indir` → `prepare_data.py --extra-train mcp-firewall-labels.jsonl`).
