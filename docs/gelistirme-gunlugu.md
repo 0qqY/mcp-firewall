@@ -350,3 +350,24 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     iki biçimde 3–4 saldırı eşik altına düştü (%100 → %99,2 ve %99,4 → %98,8). Zararsız 8.240 metinde (test,
     bağımsız set, Türkçe set) çözücü 20 metinde devreye girdi, hepsi bağımsız setteki rol yapma kartları; yeni yanlış
     alarm 1 (`Age("20" + "twenty years")` içeren bir karakter kartı), kaybolan 0. Toplam 156/156 test.
+71. **Red team döngüsü (02.11.2026 gecesi):** `training/redteam.py` eğitim setindeki saldırıları ve zararsız metinleri
+    sekiz kılıfa sarıyor (JSON alanı, log satırı, kod yorumu, HTML/Markdown, e-posta, belge notu, araç çıktısı,
+    YAML/CSV; Türkçe tohumlara Türkçe kılıf), mevcut modelle puanlıyor ve kaçırılan saldırılarla yanlış alarmları eğitim
+    verisine çeviriyor. Panelde verilen etiketler (`mcp-firewall-labels.jsonl`, geri alınanlar hariç) aynı dosyaya
+    ekleniyor; gerçek kayıtta henüz etiket yok. Değerlendirme seti (`data/eval_redteam.jsonl`, 5.200 satır) eğitimde hiç
+    kullanılmayan tohumlar (test bölümü + LLMail başarılı saldırılar) ve hiç kullanılmayan kılıf cümleleriyle kuruldu.
+    Bulgu: kılıf modeli çoğunlukla yanlış alarma itiyor. soup04-ab4'te aynı test bölümünün yanlış alarmı düz metinde
+    %4,0, kılıflı metinde %8,0 (Türkçe %6,0 → %16,3); isabet %98,6 → %97,3.
+    Üç aday (A = v4, alfa 0.4; eşik 0.9; ab4 → aday):
+    - ab6, tur 1: her kılıfa kaçırılan/yanlış alarm sayısı kadar diğer etiketten de örnek eklendi (4.172 satır).
+      Kılıflı FPR 8,0 → 5,7, devreal FPR 6,6 → 4,7; ama Türkçe FPR 8,7 → 12,5 (görev talimatları %21,8 → %33,2),
+      deepset isabeti 81,7 → 70,0, LLMail saldırıları 95,5 → 92,5.
+    - ab7, tur 2 (ab6'ya karşı yeni tohumlar, +2.234 satır): kılıflı FPR 6,6, Türkçe FPR 12,0; tur 1'den iyi değil.
+    - ab8, sıkı tarif (`--no-top-up --hard 0.9`: yalnızca gerçek 81 kaçırma ve 1.437 yanlış alarm): kılıflı FPR 4,5,
+      devreal 3,5, Türkçe FPR 7,1 (görev talimatları 18,1), test FPR 3,1; ama Türkçe isabet 89,0 → 83,3, boundary
+      isabeti 69,7 → 60,0, devvoice FPR 1,2 → 8,3. Alfa 0.3 her şeyi kötüleştirdi (kılıflı FPR 12,2).
+    Tur 1'deki Türkçe görev talimatı artışının nedeni: kılıflar "başlık satırı + altında içerik" biçiminde ve dengelemek
+    için eklenen saldırı ikizleri bu biçimi saldırıyla ilişkilendirdi ("KVKK gereği kişisel alanları gizle" + kayıt
+    0.05 → 0.99). Sıkı tarif bunu düzeltti ama yanlış alarmların ağırlığı saldırı isabetini düşürdü. Hiçbir aday
+    varsayılanı geçmedi; soup04-ab4 kaldı. Sonraki deneme için: sıkı tarife Türkçe saldırıların kılıflı ikizleri
+    eklenmeli (yalnızca Türkçe isabet düştü), yanlış alarm satırları daha az ağırlıkla.

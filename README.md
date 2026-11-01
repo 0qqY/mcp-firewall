@@ -795,7 +795,11 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 - ML sınıflandırıcısı da bir modeldir: adversarial girdilerle atlatılabilir, bu yüzden tek savunma hattı değildir.
 
 ## Yol haritası
-1. Etiketli audit verisiyle model eğitimi ve red team döngüsü
+1. Etiketli audit verisiyle model eğitimi ve red team döngüsü — araç hazır (02.11.2026,
+   [training/redteam.py](training/redteam.py)): saldırıları ve zararsız metinleri JSON alanı, log satırı, kod yorumu,
+   e-posta, belge notu gibi kılıflara sarıp modelin kaçırdıklarını ve yanlış alarmlarını, panelde etiketlenen olaylarla
+   birlikte eğitim verisine çeviriyor. İlk üç tur varsayılan modeli geçemedi (kılıflı metinde yanlış alarm %8 → %4,5
+   inerken Türkçe saldırılarda isabet %89 → %83 düştü); varsayılan model soup04-ab4 olarak kaldı
 2. Yol normalizasyonlu `paths` kısıtı — yapıldı (30.10.2026, yukarıda "Yol kısıtı")
 3. Oturum bazlı taint tracking — yapıldı (30.10.2026, yukarıda "Veri akışı takibi")
 4. Riskli çağrılar için human-in-the-loop onayı — yapıldı (30.10.2026, yukarıda "Kullanıcı onayı")

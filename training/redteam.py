@@ -126,6 +126,7 @@ def main() -> None:
     ap.add_argument("--per-row", type=int, default=3, help="carriers per seed")
     ap.add_argument("--threshold", type=float, default=0.9)
     ap.add_argument("--hard", type=float, default=0.5, help="benign variants scoring at least this are hard negatives")
+    ap.add_argument("--no-top-up", action="store_true", help="keep only real misses and hard negatives, no balancing twins")
     ap.add_argument("--max-misses", type=int, default=6000, help="cap on rows per label, split evenly across carriers")
     ap.add_argument("--seed", type=int, default=61)
     args = ap.parse_args()
@@ -155,8 +156,13 @@ def main() -> None:
         for k in sorted(CARRIERS):
             ka = [v for v in scored_a if v["source"] == f"redteam_{k}"]
             kb = [v for v in scored_b if v["source"] == f"redteam_{k}"]
-            n = max(sum(v["score"] < args.threshold for v in ka), sum(v["score"] >= args.hard for v in kb))
-            n = min(n, args.max_misses // len(CARRIERS))
+            miss, hard = sum(v["score"] < args.threshold for v in ka), sum(v["score"] >= args.hard for v in kb)
+            cap = args.max_misses // len(CARRIERS)
+            if args.no_top_up:
+                picked_a += ka[: min(miss, cap)]
+                picked_b += kb[: min(hard, cap)]
+                continue
+            n = min(max(miss, hard), cap)
             picked_a += ka[:n]
             picked_b += kb[:n]
         misses, twins = picked_a, picked_b
@@ -167,7 +173,8 @@ def main() -> None:
                 latest[(str(p), r.get("eventId"))] = r
         labelled = [dict(text=r["text"], label=int(r["label"]), source="audit_review") for r in latest.values()
                     if r.get("review") != "none" and isinstance(r.get("text"), str) and r.get("label") in (0, 1)]
-        rows = misses + twins + labelled
+        # train.py loads every split with one schema: text, label, source only.
+        rows = [{"text": r["text"], "label": r["label"], "source": r["source"]} for r in misses + twins + labelled]
         rng.shuffle(rows)
         write(args.out, rows)
         by: dict[str, list[int]] = {}
