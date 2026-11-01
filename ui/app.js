@@ -74,7 +74,7 @@ const state = {
   since: null,
   overviewId: null,
   radarMode: 'list',
-  /** The overview shows the six riskiest servers until "Daha fazla göster". */
+  /** The overview shows the eight riskiest servers until "Daha fazla göster". */
   allServers: false,
   threshold: null,
   lastRead: null,
@@ -522,7 +522,7 @@ function renderFoot() {
 
 // ---------- overview ----------
 
-const SERVER_LIMIT = 6;
+const SERVER_LIMIT = 8;
 const LEVELS = {
   high: { label: 'Yüksek risk', cls: 'blk' },
   medium: { label: 'Orta risk', cls: 'wrn' },
