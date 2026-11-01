@@ -128,6 +128,8 @@ def main() -> None:
     ap.add_argument("--hard", type=float, default=0.5, help="benign variants scoring at least this are hard negatives")
     ap.add_argument("--no-top-up", action="store_true", help="keep only real misses and hard negatives, no balancing twins")
     ap.add_argument("--max-misses", type=int, default=6000, help="cap on rows per label, split evenly across carriers")
+    ap.add_argument("--benign-keep", type=float, default=1.0, help="keep this share of the hard negatives, hardest first")
+    ap.add_argument("--tr-twins", type=int, default=0, help="add this many carrier-wrapped Turkish attacks, lowest score first")
     ap.add_argument("--seed", type=int, default=61)
     args = ap.parse_args()
     rng = random.Random(args.seed)
@@ -160,11 +162,20 @@ def main() -> None:
             cap = args.max_misses // len(CARRIERS)
             if args.no_top_up:
                 picked_a += ka[: min(miss, cap)]
-                picked_b += kb[: min(hard, cap)]
+                picked_b += kb[: round(min(hard, cap) * args.benign_keep)]
                 continue
             n = min(max(miss, hard), cap)
             picked_a += ka[:n]
             picked_b += kb[:n]
+        # Benign carrier rows alone pull Turkish attack recall down (89 -> 83 with the strict recipe), so the strict recipe
+        # can add wrapped Turkish attacks from fresh seeds, the ones the model is least sure about first.
+        if args.tr_twins:
+            used = {r["text"] for r in attacks}
+            pool = [r for r in train if r["label"] == 1 and lang_of(r) == "tr" and r["text"] not in used]
+            tr_v = variants(rng, rng.sample(pool, min(3 * args.tr_twins, len(pool))), 1, "train")
+            with torch.inference_mode():
+                st = run(tr_v)
+            picked_a += [v for v, _ in sorted(zip(tr_v, st), key=lambda p: p[1])][: args.tr_twins]
         misses, twins = picked_a, picked_b
         # The labels file is append-only: the last record per event wins and a `none` record withdraws the label.
         latest: dict = {}

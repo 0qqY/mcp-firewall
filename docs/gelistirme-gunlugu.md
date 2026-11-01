@@ -392,3 +392,12 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     hem içerik getiren hem dışarı kanal; yazma araçları yalnızca dışarıda okunan bir yere yazıyorsa (push, issue,
     comment, send...) dışarı kanal. Sonuç: playwright 47, github 37, memory 27, fetch 19, filesystem 12, git 12.
 
+74. **Red team tur 4 (01.11.2026):** Önerilen tarif denendi: sıkı tarif + Türkçe saldırıların kılıflı ikizleri
+    (`--tr-twins 800`: kullanılmamış Türkçe tohumlardan 2.400'ü bir kılıfa sarılıp puanlandı, en düşük puanlı 800'ü
+    eklendi) + yanlış alarm satırlarının %60'ı (`--benign-keep 0.6`). 881 saldırı, 862 zararsız satır; aday soup04-ab9.
+    ab4'e göre: kılıflı FPR 8,0 → 7,6, devreal 6,6 → 5,7, mcptox FPR 2,5 → 0, RAG zehirleme isabeti 58 → 68; ama
+    Türkçe isabet 89,0 → 87,4 ve Türkçe FPR 8,7 → 11,5 (görev talimatları 21,8 → 29,8), devsyn FPR 2,4 → 5,0,
+    devvoice FPR 1,2 → 6,7, sistem istemi çıkarma isabeti 82 → 62. Türkçe ikizler isabeti kısmen geri getirdi ama
+    tur 1'deki "başlık + içerik" yanlış alarmını da geri getirdi. Varsayılan değişmedi: soup04-ab4. Dört turun dersi:
+    bu kılıf verisiyle tek bir alfa-0.4 çorbası hem Türkçe isabeti hem Türkçe FPR'ı birlikte iyileştirmiyor; sıradaki
+    fırsat gerçek olay kaydı etiketleri (şu an 0).
