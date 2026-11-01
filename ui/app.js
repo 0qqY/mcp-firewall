@@ -585,6 +585,7 @@ function serverDialog(s) {
       toolLine('Onaysız silme', s.tools.destructive),
       toolLine('Onaysız komut/kod', s.tools.exec),
       toolLine('Onaysız yazma', s.tools.write),
+      toolLine('Ağ erişimi', s.tools.network ?? []),
       toolLine('Okuma', s.tools.read),
       toolLine('Onay istiyor', s.tools.asked),
       toolLine('Kapalı', s.tools.denied))] : null,

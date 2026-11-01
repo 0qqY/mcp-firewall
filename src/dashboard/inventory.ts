@@ -35,7 +35,7 @@ export interface ServerRisk {
   target: string;
   transport: 'stdio' | 'http' | 'unknown';
   policyFile?: string;
-  tools: { total: number; read: string[]; write: string[]; destructive: string[]; exec: string[]; denied: string[]; asked: string[] };
+  tools: { total: number; read: string[]; network: string[]; write: string[]; destructive: string[]; exec: string[]; denied: string[]; asked: string[] };
   week: { blocked: number; detections: number; lastSeen?: string };
   score: number;
   level: 'low' | 'medium' | 'high';
@@ -52,12 +52,20 @@ const FIREWALL_CLI = /mcp-firewall|[\\/]dist[\\/]src[\\/]cli\.js$/i;
 
 // Capability classes from tool-name words: create_issue -> create, issue; listRepos -> list, repos.
 const CLASSES = {
-  destructive: new Set(['delete', 'remove', 'drop', 'destroy', 'purge', 'truncate', 'wipe', 'kill', 'erase', 'rm', 'unlink']),
+  destructive: new Set(['delete', 'remove', 'destroy', 'purge', 'truncate', 'wipe', 'kill', 'erase', 'rm', 'unlink']),
   exec: new Set(['exec', 'execute', 'run', 'shell', 'command', 'cmd', 'eval', 'terminal', 'bash', 'powershell', 'script', 'spawn', 'process', 'evaluate']),
   write: new Set(['create', 'update', 'write', 'edit', 'push', 'merge', 'send', 'post', 'publish', 'upload', 'add', 'assign', 'fork', 'commit',
     'set', 'move', 'rename', 'request', 'submit', 'dismiss', 'close', 'reopen', 'comment', 'reply', 'patch', 'put', 'insert', 'save', 'mkdir', 'copy']),
-  read: new Set(['get', 'read', 'search', 'list', 'fetch', 'browse', 'query', 'download', 'view', 'find', 'open', 'scrape', 'crawl', 'navigate', 'lookup']),
+  // Tools that reach arbitrary URLs bring untrusted content in and can carry data out in the URL itself.
+  network: new Set(['fetch', 'navigate', 'http', 'https', 'url', 'browse', 'curl', 'wget', 'webhook', 'scrape', 'crawl']),
+  read: new Set(['get', 'read', 'search', 'list', 'query', 'download', 'view', 'find', 'open', 'lookup', 'snapshot', 'show', 'status', 'log', 'diff']),
 };
+// Writes that land somewhere other people or services read (an issue, a push, a message), not local files or notes.
+const EXTERNAL = new Set(['push', 'send', 'post', 'publish', 'upload', 'comment', 'reply', 'issue', 'pull', 'message', 'email', 'mail',
+  'tweet', 'share', 'webhook', 'invite', 'fork', 'repository', 'release', 'review', 'gist', 'channel', 'chat', 'sms']);
+// `drop` alone is drag and drop (browser_drop); with a store word it is DROP TABLE.
+const isDestructive = (w: string[]) => w.some((x) => CLASSES.destructive.has(x)) ||
+  (w.includes('drop') && w.some((x) => ['table', 'database', 'db', 'schema', 'collection', 'index', 'bucket'].includes(x)));
 // Example taint rules lead with the tools that move the most data: file and content reads, pushes and sends.
 const READ_FIRST = ['file', 'contents', 'content', 'read', 'fetch', 'download', 'email', 'message', 'document'];
 const SINK_FIRST = ['push', 'send', 'post', 'upload', 'publish', 'file', 'create', 'merge', 'write'];
@@ -201,7 +209,7 @@ export function assessServer(input: {
   const good: string[] = [];
   const add = (f: RiskFactor) => factors.push(f);
 
-  const tools = { total: toolNames.length, read: [] as string[], write: [] as string[], destructive: [] as string[], exec: [] as string[], denied: [] as string[], asked: [] as string[] };
+  const tools = { total: toolNames.length, read: [] as string[], network: [] as string[], write: [] as string[], destructive: [] as string[], exec: [] as string[], denied: [] as string[], asked: [] as string[] };
   for (const t of toolNames) {
     const w = words(t);
     const decision = policy ? evaluateToolName(policy, t) : { allowed: true };
@@ -209,8 +217,9 @@ export function assessServer(input: {
     else if ('ask' in decision && decision.ask) tools.asked.push(t);
     const open = decision.allowed && !('ask' in decision && decision.ask);
     if (!open) continue;
-    if (w.some((x) => CLASSES.destructive.has(x))) tools.destructive.push(t);
+    if (isDestructive(w)) tools.destructive.push(t);
     else if (w.some((x) => CLASSES.exec.has(x))) tools.exec.push(t);
+    else if (w.some((x) => CLASSES.network.has(x))) tools.network.push(t);
     else if (w.some((x) => CLASSES.write.has(x))) tools.write.push(t);
     else if (w.some((x) => CLASSES.read.has(x))) tools.read.push(t);
   }
@@ -261,17 +270,18 @@ export function assessServer(input: {
     }
     if (tools.destructive.length) {
       add({ id: 'destructive', points: 15, title: 'Silme araçları onaysız', why: `${list(tools.destructive)} geri alınamaz silme yapabiliyor ve onaysız çalışıyor.`, fix: 'Silme araçlarını kapat ya da onaya bağla.', snippet: 'tools:\n  rules:\n    - match: "delete_*"\n      action: deny' });
-    } else if (tools.denied.some((t) => words(t).some((x) => CLASSES.destructive.has(x)))) good.push('Silme araçları kapalı');
+    } else if (tools.denied.some((t) => isDestructive(words(t)))) good.push('Silme araçları kapalı');
 
     // Untrusted content in, a channel out: what an injection needs to exfiltrate (the "lethal trifecta").
     const taintOn = policy.taint.enabled && policy.taint.sources.length > 0 && policy.taint.sinks.length > 0;
-    const outbound = [...tools.write, ...tools.exec];
-    if (tools.read.length && outbound.length && !taintOn) {
+    const inbound = [...tools.network, ...tools.read];
+    const outbound = [...tools.write.filter((t) => words(t).some((x) => EXTERNAL.has(x))), ...tools.network, ...tools.exec];
+    if (inbound.length && outbound.length && !taintOn) {
       add({
         id: 'trifecta', points: 15, title: 'Okunan içerik dışarı yazılabiliyor',
-        why: `Sunucu dışarıdan içerik okuyor (${list(tools.read, 3)}) ve aynı oturumda dışarı yazabiliyor (${list(outbound, 3)}). Okunan bir metindeki enjeksiyon, özel veriyi yazma aracıyla dışarı taşıyabilir. Veri akışı takibi (taint) kapalı.`,
+        why: `Sunucu dışarıdan içerik okuyor (${list(inbound, 3)}) ve aynı oturumda dışarı yazabiliyor (${list(outbound, 3)}). Okunan bir metindeki enjeksiyon, özel veriyi yazma aracıyla dışarı taşıyabilir. Veri akışı takibi (taint) kapalı.`,
         fix: 'Taint takibini aç: okuma araçlarının döndürdüğü içerik yazma araçlarının argümanında görünürse çağrı onaya düşsün.',
-        snippet: `taint:\n  enabled: true\n  action: ask\n  sources:\n${byImpact(tools.read, READ_FIRST).slice(0, 3).map((t) => `    - match: "${t}"\n      label: private`).join('\n')}\n  sinks:\n${byImpact(outbound, SINK_FIRST).slice(0, 3).map((t) => `    - match: "${t}"`).join('\n')}`,
+        snippet: `taint:\n  enabled: true\n  action: ask\n  sources:\n${byImpact(inbound, READ_FIRST).slice(0, 3).map((t) => `    - match: "${t}"\n      label: private`).join('\n')}\n  sinks:\n${byImpact(outbound, SINK_FIRST).slice(0, 3).map((t) => `    - match: "${t}"`).join('\n')}`,
       });
     } else if (taintOn) good.push('Veri akışı takibi (taint) açık');
     if (tools.write.length && !tools.asked.length && policy.tools.default !== 'ask') {

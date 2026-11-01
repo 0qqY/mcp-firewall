@@ -383,4 +383,12 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     olayları değil bekleyen değişiklikler sayılıyor: 28.10'daki outputSchema geçişinin 231 olayı onaylanmıştı. Gerçek
     GitHub MCP 37 puan (orta): taint kapalı (+15), 33 engellenen saldırı (+10), 20 onaysız yazma aracı (+8), `onNew:
     allow` (+4). 162/162 test.
+73. **Beş yeni MCP sunucusu (01.11.2026):** filesystem, memory, playwright (npm) ve fetch, git (PyPI), en az iki hafta önce
+    çıkmış sürümlerle `~/.mcp-firewall/servers` altına kuruldu ve Claude Code'a firewall arkasında eklendi (ortak
+    `policy-genel.yaml`, olay kaydı ve pin dosyası GitHub'la ortak; filesystem ve git yalnızca `~/MCP-Klasor`,
+    playwright `--isolated`). İlk puanlar sınıflandırmada iki hatayı gösterdi: `browser_drop` (sürükle-bırak) silme
+    sayılmıştı, yerel yazan memory/filesystem "okunan içerik dışarı yazılabiliyor" alıyordu, fetch ise dışarı kanal
+    sayılmıyordu. Artık `drop` yalnızca table/database gibi bir kelimeyle silme; URL'ye giden araçlar (fetch, navigate)
+    hem içerik getiren hem dışarı kanal; yazma araçları yalnızca dışarıda okunan bir yere yazıyorsa (push, issue,
+    comment, send...) dışarı kanal. Sonuç: playwright 47, github 37, memory 27, fetch 19, filesystem 12, git 12.
 
