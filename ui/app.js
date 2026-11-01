@@ -74,6 +74,8 @@ const state = {
   since: null,
   overviewId: null,
   radarMode: 'list',
+  /** The overview shows the six riskiest servers until "Daha fazla göster". */
+  allServers: false,
   threshold: null,
   lastRead: null,
 };
@@ -520,6 +522,7 @@ function renderFoot() {
 
 // ---------- overview ----------
 
+const SERVER_LIMIT = 6;
 const LEVELS = {
   high: { label: 'Yüksek risk', cls: 'blk' },
   medium: { label: 'Orta risk', cls: 'wrn' },
@@ -533,13 +536,13 @@ function serverList() {
     ? h('p', { class: 'srv-empty' }, list === null ? 'Sunucu listesi okunamadı.' : 'Yükleniyor…')
     : !list.length
       ? h('p', { class: 'srv-empty' }, h('b', {}, 'Bu makinede MCP sunucusu bulunamadı.'), ' Claude Code ve Claude Desktop ayar dosyalarına bakıldı.')
-      : h('ul', { class: 'srv-grid' }, list.map((s) => {
+      : h('ul', { class: 'srv-grid' }, (state.allServers ? list : list.slice(0, SERVER_LIMIT)).map((s) => {
         const lv = LEVELS[s.level];
         const top = s.factors[0];
         const facts = [
-          s.firewalled ? "firewall'da" : 'korumasız',
+          top ? top.title : 'Belirgin bir risk yok',
+          s.firewalled ? null : 'korumasız',
           s.tools.total ? `${s.tools.total} araç` : null,
-          s.week.blocked ? `7 günde ${s.week.blocked} engel` : null,
         ].filter(Boolean).join(' · ');
         return h('li', {},
           h('button', { class: `srv ${s.level}`, onclick: () => serverDialog(s), 'aria-label': `${s.name}, risk puanı ${s.score}, ${lv.label}. Ayrıntılar` },
@@ -547,15 +550,18 @@ function serverList() {
             h('span', { class: 'srv-body' },
               h('span', { class: 'srv-name' }, s.name),
               h('span', { class: `vd ${lv.cls}` }, lv.label),
-              h('span', { class: 'srv-facts' }, facts),
-              h('span', { class: 'srv-top' }, top ? top.title : 'Belirgin bir risk bulunmadı')),
-            icon('arrowRight', 18)));
+              h('span', { class: 'srv-facts', title: facts }, facts)),
+            icon('arrowRight', 15)));
       }));
   return h('section', { class: 'wrap srv-sec', 'aria-labelledby': 'sunucular' },
     h('div', { class: 'sec-h' },
       h('h2', { id: 'sunucular' }, 'MCP sunucuların'),
-      h('p', {}, list?.length ? 'Puan 0–100; yüksek olan daha riskli. Neden yüksek olduğunu ve nasıl düşürüleceğini görmek için bir sunucuya tıkla.' : '')),
-    body);
+      h('p', {}, list?.length ? 'Puan 0–100; yüksek olan daha riskli. Nedenini ve nasıl düşürüleceğini görmek için tıkla.' : '')),
+    body,
+    list?.length > SERVER_LIMIT
+      ? h('button', { class: 'srv-more', 'aria-expanded': String(state.allServers), onclick: () => { state.allServers = !state.allServers; renderOverview(); } },
+        state.allServers ? 'Daha az göster' : `Daha fazla göster (${list.length - SERVER_LIMIT})`)
+      : null);
 }
 
 function serverDialog(s) {
