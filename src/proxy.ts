@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Readable, Writable } from 'node:stream';
 import type { AuditEvent, AuditLog } from './audit.js';
 import type { CodeFingerprint } from './codepin.js';
-import { decodeEmbedded, withDecoded } from './decode.js';
+import { decodeEmbedded, stripImageData, withDecoded } from './decode.js';
 import { deepScan, formatFindings, REDACTION_MARKER } from './dlp.js';
 import {
   evaluateMethod,
@@ -725,8 +725,9 @@ export class FirewallProxy {
     const { ml, decoding } = this.policy;
     try {
       // Neutralise our own DLP redaction markers before scoring: the bracketed [REDACTED:…] reads as an injection
-      // to the classifier and would turn a masked result into a block. Affects only the scan input, not the output.
-      const scan = texts.map((t) => t.replace(REDACTION_MARKER, 'redacted'));
+      // to the classifier and would turn a masked result into a block. Embedded images go too (see stripImageData).
+      // Affects only the scan input, not the output.
+      const scan = texts.map((t) => stripImageData(t.replace(REDACTION_MARKER, 'redacted')));
       const scores = await scoreTexts(await this.loadModel(), decoding.enabled ? scan.map(withDecoded) : scan, ml);
       return scores.map((s) => {
         if (s.score >= ml.threshold) {

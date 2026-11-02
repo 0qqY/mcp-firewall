@@ -392,7 +392,11 @@ Mesaj ─► Katman 1: kurallar, DLP, pinning ─► Katman 2: ML (tool tanımla
   Gerçek sunucularda yanlış alarm yüksek olabilir: GitHub'ın resmî MCP sunucusunda (v2.0.3) 46 tanımın 21'i
   işaretlendi ve tarama `tools/list`'i 112 saniye sürdürdü (MCP istemcilerinin çoğu 60 saniyede vazgeçer). Böyle
   sunucularda `ml.scan.toolDefinitions: off` kullanın; tanımlar pin, desen ve gizli karakter kontrolüyle korunmaya
-  devam eder.
+  devam eder. Bu yanlış alarmların kaynağı tanımlara gömülü simgelerdi (`icons`, `data:image/png;base64,…`): model
+  uzun base64 dizisini gizleme sanıyordu. Gömülü resimler artık taramadan önce "image" kelimesiyle değiştiriliyor
+  (yalnızca baytları gerçekten PNG/JPEG/GIF/WebP/ICO imzasıyla başlayanlar; resim kılığındaki metin ve SVG
+  taranmaya devam eder). Gerçek sunucuda (02.11.2026) 46 tanımın hiçbiri işaretlenmedi, en yüksek skor 0,5'in altında;
+  `tools/list` taraması 40 saniye sürdü (MCP istemcilerinin 60 saniyelik sınırına yakın).
 - **Tool sonuçları:** `tools/call` ve `resources/read` sonuçları DLP'den sonra skorlanır (dolaylı injection).
   Sonuç JSON tutan bir metinse model ham JSON'u değil içindeki değerleri (ve alan adına benzemeyen anahtarları)
   okur: GitHub'ın commit listesi ham hâliyle 0,994 alıp engelleniyordu, değerleriyle 0,008. Prompt injection'ı

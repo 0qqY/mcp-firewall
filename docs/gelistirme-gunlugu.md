@@ -418,3 +418,17 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     `audit.notify` ile firewall engellediği anda masaüstü bildirimi gösteriyor (Windows bildirimi, macOS osascript,
     Linux notify-send). 30 saniye içindeki ardışık engellemeler tek özet bildirim oluyor. Metin ortam değişkeniyle
     geçiyor, komut satırına girmiyor. Varsayılan kapalı; kullanıcının iki politikasında açıldı. 167/167 test.
+78. **Etiketlerle eğitim ve gömülü resim filtresi (02.11.2026):** 112 panel etiketinin hepsi 10 kat ağırlıkla
+    v12dev2'ye eklenip eğitildi, v4 ile 0,4 çorbası soup04-ab10. ab4'e göre yanlış alarm hemen her sette düştü
+    (kılıflı 8,0 → 5,1, devreal 6,6 → 4,1, Türkçe 8,7 → 7,0, Türkçe görev talimatı 7,7 → 1,0) ama isabet de düştü
+    (Türkçe 89,0 → 87,7, boundary 69,7 → 65,3, LLMail başarılı 99,0 → 97,7). ab4/ab10 karışımları iki modelin
+    arasına doğrusal düştü. Aynı FPR'da iki modelin isabeti neredeyse aynı (kılıflı 97,3/97,6, Türkçe 89,0/89,0,
+    AUC farkı < 0,003): eğitim ayrımı iyileştirmedi, skorları kaydırdı, yani eşiği yükseltmekle eşdeğer. Varsayılan
+    ab4 kaldı. Bunun yerine gerçek yanlış alarmlar türlerine ayrıldı: 33'ün 22'si GitHub araç tanımlarıydı ve hepsi
+    tanıma gömülü simgelerden (`data:image/png;base64`) geliyordu; de-obfuscation bu diziyi sözde metne de
+    çeviriyordu ("base64" → "base6a"). ML girdisinde gerçek resim imzası taşıyan data URI'ler artık "image" kelimesiyle
+    değiştiriliyor; kayıttaki örneklerde 22 alarmın 22'si eşiğin altına iniyor, değerlendirme setlerindeki saldırılarda
+    gerçek resim içeren yok. Kalan gerçek alarmlar (README, testler, GitHub hata mesajları 1,000; bir CSS sayfası 0,95)
+    için bağlama göre eşik ölçüldü: 1,000'deki alarmlara hiçbir eşik yetmiyor, tek CSS sayfası için ayar eklemek
+    erken; bağlam eşiği eklenmedi. Gerçek GitHub sunucusunda (v2.0.3) tanım taraması açıkken 46 tanımın 0'ı
+    işaretlendi (önceden 21), hiçbiri 0,5'i geçmedi; tarama 40 sn (önceden 112). 169/169 test.

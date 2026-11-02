@@ -250,6 +250,23 @@ export function deobfuscate(text: string): string {
   return out;
 }
 
+const IMAGE_DATA_URI = /data:image\/(?:png|jpe?g|gif|webp|x-icon|vnd\.microsoft\.icon);base64,([A-Za-z0-9+/]+={0,2})/gi;
+/** File signatures; a data URI only counts as an image when its bytes start with one. */
+const IMAGE_MAGIC = ['89504e470d0a1a0a', 'ffd8ff', '47494638', '52494646', '00000100'];
+
+/**
+ * Replaces embedded raster images (`data:image/png;base64,…`, as in MCP tool icons) with the word "image".
+ * The classifier reads a long base64 blob as obfuscation and flags it: every false alarm on the GitHub
+ * server's tool list came from its icons. Only payloads that decode to a real image signature are removed,
+ * so text dressed up as an image is still scanned. SVG is text and is never removed.
+ */
+export function stripImageData(text: string): string {
+  return text.replace(IMAGE_DATA_URI, (uri, b64: string) => {
+    const head = Buffer.from(b64.slice(0, 16), 'base64').toString('hex');
+    return IMAGE_MAGIC.some((m) => head.startsWith(m)) ? 'image' : uri;
+  });
+}
+
 /**
  * What the scanners read: the text with character-level obfuscation undone, plus everything decoded
  * from it. Scanning the de-obfuscated form (not the raw one) keeps odd-looking but harmless text from
