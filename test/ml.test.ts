@@ -365,3 +365,28 @@ test('ml.review is off by default', () => {
   assert.deepEqual(compilePolicy({}, dir).ml.review, { nearMiss: 0, sample: 0 });
   assert.throws(() => compilePolicy({ ml: { review: { sample: 2 } } }, dir), /ml.review.sample/);
 });
+
+test('a channel-tagged model reads where each text came from', async () => {
+  const clf = { ...fakeClassifier(), channelTags: true };
+  const h = harness({ ml: { enabled: true } }, clf);
+  h.toServer({ jsonrpc: '2.0', id: 30, method: 'tools/list' });
+  await h.atServer.next();
+  h.toClient({ jsonrpc: '2.0', id: 30, result: { tools: [{ name: 'echo', description: 'Echoes text', inputSchema: { type: 'object' } }] } });
+  await h.atClient.next();
+  h.toServer(call(31));
+  await h.atServer.next();
+  h.toClient(textResult(31, 'weather is fine'));
+  await h.atClient.next();
+  h.toServer(getPrompt(32));
+  await h.atServer.next();
+  h.toClient(promptResult(32, 'Act as a code reviewer'));
+  await h.atClient.next();
+  const firstLines = clf.calls.flat().map((t) => t.split('\n')[0]);
+  assert.deepEqual(firstLines, ['[tool definition]', '[tool output]', '[prompt template]']);
+});
+
+test('an untagged model gets the text unchanged', async () => {
+  const clf = fakeClassifier();
+  await scoreTexts(clf, ['plain'], { chunkChars: 100, maxChunks: 4 }, 'definition');
+  assert.deepEqual(clf.calls, [['plain']]);
+});

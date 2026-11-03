@@ -432,3 +432,16 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     için bağlama göre eşik ölçüldü: 1,000'deki alarmlara hiçbir eşik yetmiyor, tek CSS sayfası için ayar eklemek
     erken; bağlam eşiği eklenmedi. Gerçek GitHub sunucusunda (v2.0.3) tanım taraması açıkken 46 tanımın 0'ı
     işaretlendi (önceden 21), hiçbiri 0,5'i geçmedi; tarama 40 sn (önceden 112). 169/169 test.
+79. **Kanal etiketleri ve rol istemi ikizleri (02–03.11.2026):** Firewall kullanıcının mesajını hiç görmez; yalnızca
+    araç tanımı, araç sonucu ve prompt şablonu görür. Model her parçanın başında kanalı görsün diye
+    `[tool definition]`, `[tool output]`, `[prompt template]` etiketleri eklendi (`training/channels.py`; firewall
+    tarafında model klasöründeki `mcp-firewall.json` `{"channelTags": true}` derse etiket eklenir, ab4 gibi etiketsiz
+    modellerde hiçbir şey değişmez). Üç deneme, hepsi v4 tarifi + v12dev2, 0,4 çorbası; ab4'e karşı eşik 0,9:
+    soup04-ctx (yalnız etiket): şablonlarda isabet 98,2 → 96,5, yanlış alarm 38,0 → 0,0; ama araç sonucunda LLMail
+    97,2 → 64,3, boundary isabeti 69,7 → 36,5 (v10 etkisi tekrarlandı: rol istemi araç sonucunda 0,9% yakalandı).
+    soup04-twin (zararsız rol istemlerinin yarısı `[tool output]` etiketiyle saldırı olarak da eklendi): araç
+    sonucundaki rol istemleri %97,5 yakalandı ama şablon isabeti 87,7, LLMail 88,8, boundary FPR 24 → 74.
+    soup04-twin2 (tamamı ikizlendi): şablonlarda 94,7 / 0,0, LLMail 96,8, Türkçe 88,3 / 8,5; ama araç sonucunda yanlış
+    alarm yaklaşık iki katı (devreal 6,6 → 12,6, devvoice 1,2 → 10,8, boundary 24 → 76, obf 6,3 → 13,3). Tek model
+    iki kanal için zıt sınırı öğrenirken araç sonucu tarafı bozuluyor. Varsayılan ab4 kaldı; kanal kodu sonraki
+    deneme (yalnızca `prompts/get` için ikinci model) için depoda. 171/171 test.

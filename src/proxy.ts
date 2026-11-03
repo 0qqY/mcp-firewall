@@ -27,7 +27,7 @@ import {
   type JsonObject,
   type JsonRpcMessage,
 } from './jsonrpc.js';
-import { extractMlText, extractText, scoreTexts, type Classifier } from './ml/classifier.js';
+import { extractMlText, extractText, scoreTexts, type Channel, type Classifier } from './ml/classifier.js';
 import { hashPromptTemplate, promptPinKey, type PinStatus, type PinStore } from './pinning.js';
 import type { Policy } from './policy.js';
 import { TaintTracker } from './taint.js';
@@ -662,7 +662,7 @@ export class FirewallProxy {
 
   /** Runs the classifier on one text; returns the refusal reason when the message must be stopped. */
   private async mlVerdict(text: string, ctx: Context, action: 'block' | 'warn'): Promise<string | undefined> {
-    const [flag] = await this.mlFlags([text], ctx);
+    const [flag] = await this.mlFlags([text], ctx, ctx.method === 'prompts/get' ? 'prompt' : 'output');
     if (!flag) return undefined;
     const event = { ...ctx, score: flag.score, excerpt: flag.excerpt };
     if (action === 'warn') {
@@ -721,14 +721,14 @@ export class FirewallProxy {
   }
 
   /** Runs the classifier over `texts`; one flag (or undefined) per text, honouring `ml.failMode` and `ml.onTruncated`. */
-  private async mlFlags(texts: string[], ctx: Context): Promise<(MlFlag | undefined)[]> {
+  private async mlFlags(texts: string[], ctx: Context, channel: Channel = 'output'): Promise<(MlFlag | undefined)[]> {
     const { ml, decoding } = this.policy;
     try {
       // Neutralise our own DLP redaction markers before scoring: the bracketed [REDACTED:…] reads as an injection
       // to the classifier and would turn a masked result into a block. Embedded images go too (see stripImageData).
       // Affects only the scan input, not the output.
       const scan = texts.map((t) => stripImageData(t.replace(REDACTION_MARKER, 'redacted')));
-      const scores = await scoreTexts(await this.loadModel(), decoding.enabled ? scan.map(withDecoded) : scan, ml);
+      const scores = await scoreTexts(await this.loadModel(), decoding.enabled ? scan.map(withDecoded) : scan, ml, channel);
       return scores.map((s) => {
         if (s.score >= ml.threshold) {
           return { reason: `ML classifier flagged possible prompt injection (score ${s.score.toFixed(3)})`, score: s.score, excerpt: s.excerpt };
@@ -763,7 +763,7 @@ export class FirewallProxy {
     const { ml, descriptionScan } = this.policy;
     const mlResults =
       this.classifier && ml.scan.toolDefinitions !== 'off'
-        ? await this.mlFlags(items.map(definitionMlText), { direction: 'server->client', method })
+        ? await this.mlFlags(items.map(definitionMlText), { direction: 'server->client', method }, 'definition')
         : [];
     return items.map((item, i) => {
       const ctx: Context = { direction: 'server->client', method, tool: names[i] };

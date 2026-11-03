@@ -40,14 +40,16 @@ def chunk_text(text: str, size: int) -> list[str]:
 
 
 @torch.no_grad()
-def score(model, tokenizer, texts: list[str], batch: int, max_len: int, device: str, chunk_chars: int = 0) -> np.ndarray:
-    """INJECTION probability per text. With chunk_chars, scores every window and keeps the max, like the firewall."""
+def score(model, tokenizer, texts: list[str], batch: int, max_len: int, device: str, chunk_chars: int = 0,
+          prefixes: list[str] | None = None) -> np.ndarray:
+    """INJECTION probability per text. With chunk_chars, scores every window and keeps the max, like the firewall.
+    prefixes (one per text, e.g. a channels.py tag + newline) go in front of every window, as the firewall does."""
     idx = injection_index(model.config.id2label)
     owners, pieces = [], []
     for i, t in enumerate(texts):
         for c in chunk_text(t, chunk_chars) if chunk_chars else [t]:
             owners.append(i)
-            pieces.append(c)
+            pieces.append(prefixes[i] + c if prefixes else c)
     out = []
     for i in range(0, len(pieces), batch):
         enc = tokenizer(pieces[i : i + batch], truncation=True, max_length=max_len, padding=True, return_tensors="pt").to(device)

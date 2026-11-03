@@ -1,5 +1,18 @@
-import { basename, dirname, sep } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { basename, dirname, join, sep } from 'node:path';
 import type { Classifier } from './classifier.js';
+
+/** Optional `mcp-firewall.json` next to config.json: how the model expects its input (`{"channelTags": true}`). */
+function readModelInfo(modelDir: string): { channelTags?: unknown } {
+  const file = join(modelDir, 'mcp-firewall.json');
+  if (!existsSync(file)) return {};
+  try {
+    const info: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    return typeof info === 'object' && info !== null ? info : {};
+  } catch (err) {
+    throw new Error(`cannot read ${file}: ${(err as Error).message}`);
+  }
+}
 
 export interface TransformersOptions {
   dtype: 'fp32' | 'fp16' | 'q8';
@@ -34,6 +47,7 @@ export async function loadTransformersClassifier(modelDir: string, opts: Transfo
 
   return {
     name: basename(modelDir),
+    channelTags: readModelInfo(modelDir).channelTags === true,
     async injectionScores(texts: string[]): Promise<number[]> {
       const scores: number[] = [];
       for (let i = 0; i < texts.length; i += batchSize) {

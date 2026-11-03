@@ -3,8 +3,21 @@ import { isObject } from '../jsonrpc.js';
 /** A prompt-injection model. Implementations must return one probability per input, in order. */
 export interface Classifier {
   readonly name: string;
+  /** The model was trained with a channel tag in front of each input (see CHANNEL_TAGS). */
+  readonly channelTags?: boolean;
   injectionScores(texts: string[]): Promise<number[]>;
 }
+
+/**
+ * Where a text reached the firewall. The same sentence means different things in each: a tool definition and a
+ * prompt template address the model by design, a tool result should not. Must match training/channels.py.
+ */
+export type Channel = 'definition' | 'output' | 'prompt';
+export const CHANNEL_TAGS: Record<Channel, string> = {
+  definition: '[tool definition]',
+  output: '[tool output]',
+  prompt: '[prompt template]',
+};
 
 export interface ChunkOptions {
   chunkChars: number;
@@ -40,8 +53,9 @@ function withinBudget(chunks: string[], max: number): string[] {
   return [...chunks.slice(0, head), ...chunks.slice(chunks.length - (max - head))];
 }
 
-/** Scores many texts with a single batched classifier call. */
-export async function scoreTexts(classifier: Classifier, texts: string[], opts: ChunkOptions): Promise<TextScore[]> {
+/** Scores many texts with a single batched classifier call; a channel-tagged model gets the tag on every chunk. */
+export async function scoreTexts(classifier: Classifier, texts: string[], opts: ChunkOptions, channel: Channel = 'output'): Promise<TextScore[]> {
+  const prefix = classifier.channelTags ? `${CHANNEL_TAGS[channel]}\n` : '';
   const owners: number[] = [];
   const chunks: string[] = [];
   const results: TextScore[] = texts.map((text, i) => {
@@ -55,7 +69,7 @@ export async function scoreTexts(classifier: Classifier, texts: string[], opts: 
   });
   if (chunks.length === 0) return results;
 
-  const scores = await classifier.injectionScores(chunks);
+  const scores = await classifier.injectionScores(prefix ? chunks.map((c) => prefix + c) : chunks);
   if (scores.length !== chunks.length) {
     throw new Error(`classifier returned ${scores.length} scores for ${chunks.length} inputs`);
   }

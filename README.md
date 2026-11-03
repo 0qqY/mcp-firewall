@@ -776,8 +776,10 @@ yazılır. Bedeli: şablona gömülü saldırıların çoğu yalnızca loglanır
 seçer, araç çıktısı gibi modelin kendi başına çektiği içerik değildir; şablonların %40'ını engellemek ise
 kullanıcıyı tüm firewall'u `monitor` moduna almaya iter. Yüksek riskli kurulumlarda `promptResults: block`
 seçilebilir. 28.10.2026'dan itibaren onaylanan şablon sonradan değişirse reddediliyor (`pinning.prompts`); ilk
-görüşten itibaren zehirli olan şablon ise yalnızca uyarıyla geçer (`pinning.onNew: hide` ile bekletilebilir). Açık
-kalan iş: rol istemi verisiyle model denemesi (v10'da LLMail isabetini düşürmüştü).
+görüşten itibaren zehirli olan şablon ise yalnızca uyarıyla geçer (`pinning.onNew: hide` ile bekletilebilir).
+03.11.2026'da kanal etiketli modeller denendi (geliştirme günlüğü 79): şablonlarda yanlış alarm 0'a iniyor ama araç
+sonuçlarında ya isabet ya yanlış alarm bozuluyor; varsayılan model değişmedi. Firewall, model klasöründe
+`mcp-firewall.json` `{"channelTags": true}` bulunursa her parçanın başına kanal etiketini ekler.
 
 MCPTox saldırıları çoğunlukla "bu aracı kullanmadan önce zorunlu olarak şu aracı çağır" biçiminde;
 "kullanıcı dur dese de devam et" türü davranış kuralı saldırılarını kapsamıyor. v3 MCPTox biçiminde
