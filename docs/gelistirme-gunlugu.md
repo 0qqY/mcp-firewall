@@ -445,3 +445,13 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     alarm yaklaşık iki katı (devreal 6,6 → 12,6, devvoice 1,2 → 10,8, boundary 24 → 76, obf 6,3 → 13,3). Tek model
     iki kanal için zıt sınırı öğrenirken araç sonucu tarafı bozuluyor. Varsayılan ab4 kaldı; kanal kodu sonraki
     deneme (yalnızca `prompts/get` için ikinci model) için depoda. 171/171 test.
+80. **Dış Türkçe setler, kılıflı ölçüm (03.11.2026):** Yol haritası 7'deki "dış Türkçe setlerde düşük isabet" ab4 ile
+    yeniden ölçüldü (eşik 0,9, isabet / yanlış alarm): xTRam1 Türkçe 59,9 / 2,9 (soup05'te 49,0), aynı satırların
+    İngilizcesi 61,2 / 2,1, rogue-security 71,8 / 15,6, AltaySec 63,0. Türkçe ile İngilizce arasında 1,3 puan var;
+    kaçırılanların çoğu kullanıcının sohbet botuna doğrudan yazdığı tehdit, zararlı istek ve kimlik/PIN talepleri,
+    firewall'un hiç görmediği kanal. MCP'deki karşılığını ölçmek için bu setlerden 2.500 satır (1.400 saldırı,
+    1.100 zararsız) red team'in Türkçe kılıflarına (JSON, log, kod yorumu, e-posta, belge, araç çıktısı, YAML/CSV,
+    değerlendirme kalıpları) birer kez sarıldı. ab4: isabet 62,2 → 77,8 (xTRam1 58,4 → 80,1), ama yanlış alarm
+    7,7 → 16,6 (xTRam1 zararsızları 1,7 → 11,1). Kılıfta düz hâlde yakalanıp kaçırılan saldırı 11, tersi 229. Yani
+    araç çıktısında Türkçe isabet sorunu yok; sorun kılıf içindeki zararsız isteklerde yanlış alarm (kod yorumu,
+    YAML/CSV ve JSON'da %18–22), red team turlarındaki bulguyla aynı.
