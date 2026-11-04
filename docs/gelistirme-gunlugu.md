@@ -455,3 +455,18 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     7,7 → 16,6 (xTRam1 zararsızları 1,7 → 11,1). Kılıfta düz hâlde yakalanıp kaçırılan saldırı 11, tersi 229. Yani
     araç çıktısında Türkçe isabet sorunu yok; sorun kılıf içindeki zararsız isteklerde yanlış alarm (kod yorumu,
     YAML/CSV ve JSON'da %18–22), red team turlarındaki bulguyla aynı.
+81. **DeepSeek ile etiket ve veri (04.11.2026):** `training/llm_label.py` gerçek kayıttaki 136 metin parçasını
+    DeepSeek'e (deepseek-v4-pro) sordu; panelden verilmiş 112 etiketle uyum 77/112 (%69). Kendi başına etiket için
+    yetersiz, yalnızca "yeniden bak" işareti olarak kullanılabilir; öneriler ayrı dosyaya yazılıyor, etiket
+    dosyasına dokunulmuyor. `training/llm_synth.py` DeepSeek'e (deepseek-flash) araç çıktısı biçiminde (JSON, log,
+    kod, e-posta, README, YAML/CSV, bilet, sohbet, HTML, tablo, takvim, dosya) içinde meşru istek geçen belgeler ve
+    aynı belgenin yapay zekâya yönelik saldırı eklenmiş ikizini yazdırıyor; takvim ve tablo yalnızca test bölümünde.
+    İlk denemede "prompt injection'ı anlatan belge" türü zararsız tarafa gerçek saldırı cümlesi koyduğu için
+    çıkarıldı ve böyle çiftleri eleyen bir filtre eklendi. Bakiye bittiği için 665 çift (532 eğitim, 66 test)
+    üretildi. ab4 bu test bölümünde 92,4 / 54,5 (isabet / yanlış alarm, eşik 0,9). v12dev2'ye 6 kat (llm6) ve
+    3 kat (llm3) eklenip eğitildi, v4 ile 0,4 çorbası. soup04-llm6: DeepSeek testi 93,9 / 1,5 (AUC 0,893 → 0,998),
+    red team kılıfları yanlış alarm 8,0 → 4,8, devreal 6,6 → 2,8, devsyn 2,4 → 1,0; ama Türkçe 89,0 / 8,7 → 84,9 /
+    12,0 (AUC 0,964 → 0,948), boundary isabeti 69,7 → 64,0, kılıflı Türkçe 77,8 / 16,6 → 64,1 / 10,8 (AUC 0,892 →
+    0,880). soup04-llm3 Türkçede daha az bozuldu (88,0 / 10,3) ama kazancı da azaldı. Varsayılan ab4 kaldı.
+    Aynı üreteçten gelen test bölümü küçük ve dağılımı eğitimle aynı; Türkçe kaybı gerçek. Sonraki deneme için daha
+    fazla ve Türkçesi daha doğal veri gerekiyor (bakiye yüklenmesi kullanıcının kararı).
