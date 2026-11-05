@@ -11,7 +11,7 @@ npm run build
 node demo/web/run.mjs
 ```
 
-Model depoda tutulmaz; `MCP_FIREWALL_MODEL` ile yolunu verin (varsayılan `./models/mcp-pi-mmbert-mix-ab4-llm6-30`).
+Model depoda tutulmaz; `MCP_FIREWALL_MODEL` ile yolunu verin (varsayılan `./models/mcp-pi-mmbert-mix-ab4-lab-30`).
 Kendi kendine yeter; dış ağ gerekmez.
 
 ## Beklenen sonuç

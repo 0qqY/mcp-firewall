@@ -412,13 +412,13 @@ Mesaj ─► Katman 1: kurallar, DLP, pinning ─► Katman 2: ML (tool tanımla
 - Mesaj sırası her yönde korunur; model hatasında `failMode` (varsayılan `closed`) uygulanır.
 - `Classifier` arayüzü ([src/ml/classifier.ts](src/ml/classifier.ts)) başka modellerin takılmasına izin verir.
 
-### Varsayılan model: mmBERT mix-ab4-llm6-30
-[policy.example.yaml](policy.example.yaml) `./models/mcp-pi-mmbert-mix-ab4-llm6-30` dizinini kullanır. Bu model çok
+### Varsayılan model: mmBERT mix-ab4-lab-30
+[policy.example.yaml](policy.example.yaml) `./models/mcp-pi-mmbert-mix-ab4-lab-30` dizinini kullanır. Bu model çok
 dilli mmBERT-base'in (MIT) ince ayarlarının ağırlık ortalamasıdır. Temeli soup04-ab4: %60 v4 verisiyle, %40 çeviri,
 görev talimatı ve güvenlik mühendisliği verisiyle eğitilen ince ayar. Varsayılan model bunun %70'i ile, aynı tarife
-DeepSeek'in yazdığı araç çıktıları eklenerek eğitilen soup04-llm6'nın %30'udur. Ölçümler aşağıda "Çok dilli eğitim
-ve mmBERT", "Görev talimatı verisi", "Güvenlik mühendisliği metni" ve "DeepSeek ile üretilen araç çıktıları"
-başlıklarında.
+DeepSeek'in yazdığı araç çıktıları ve panelde etiketlenmiş gerçek olaylar eklenerek eğitilen soup04-lab'ın %30'udur. Ölçümler aşağıda "Çok dilli eğitim
+ve mmBERT", "Görev talimatı verisi", "Güvenlik mühendisliği metni", "DeepSeek ile üretilen araç çıktıları" ve
+"Panel etiketleriyle eğitim" başlıklarında.
 Eğitim verisinde MCPTox olduğu için (yazar izniyle, yeniden dağıtılamaz) model dağıtılmaz; `training/` içinde, açık
 veri setleri indirildikten sonra (aşağıdaki tablo) şöyle üretilir (iki eğitim RTX 5050'de ~100 dk; çeviri adımı
 ayrıca sürer):
@@ -470,6 +470,12 @@ python combine.py --a runs/mcp-pi-mmbert-soup04-ab4/best --b runs/mcp-pi-mmbert-
 ```bash
 python export_onnx.py --model runs/mcp-pi-mmbert-mix-ab4-llm6-30/best --out ../models/mcp-pi-mmbert-mix-ab4-llm6-30
 ```
+
+Varsayılan modelde son adım panel etiketleri: panelden dışa aktarılan etiketler (`/api/labels.jsonl`, olay başına son
+kayıt, aynı metin bir kez) metnin SHA-256 özetine göre %60 eğitim / %40 ölçüm olarak ayrılır. Eğitim payı 10 kez
+`data/v12llm6/train.jsonl`'a eklenir (`data/v12lab`); geri kalan llm6 ile aynı (`--data data/v12lab --out
+runs/mcp-pi-mmbert-lab`, v4 ile 0.4 çorbası soup04-lab, ab4 ile 0.3 karışımı mix-ab4-lab-30). Etiketler kendi
+kayıtlarınızdan gelir; bu depodaki model sahibinin 107 etiketiyle eğitildi.
 
 Ardından politikada `ml.enabled: true` yap. Yalnızca fp32 kullanılır (`ml.dtype: fp32`).
 
@@ -803,6 +809,22 @@ mix-30 Türkçeyi ab4 düzeyinde tutup yanlış alarmı her sette azaltan tek or
 değil. DeepSeek test bölümü küçük ve eğitimle aynı üreteçten geliyor. mix-30, 05.11.2026'da varsayılan yapıldı
 (ONNX ile PyTorch arasında olasılık farkı 0.0000; int8 200 satırda 8 kararı değiştirdiği için silindi).
 
+**Panel etiketleriyle eğitim:** panelde "Yanlış alarm" / "Doğru alarm" denen 107 gerçek olay (çoğu GitHub araç
+tanımları, base64'e benzeyen metinler, hata mesajları) metin özetine göre ayrıldı: 59'u eğitime (10 kat), 48'i
+ölçüme. Ölçüm payında, eşik 0.9 (saldırı yakalama / 17, yanlış alarm / 31):
+
+| Model | Yakalama | Yanlış alarm | Türkçe | DeepSeek testi FPR | Depodaki metinler FPR | Kılıflı Türkçe |
+|---|---|---|---|---|---|---|
+| soup04-ab4 | 13 | 30 | 0.890 / 0.087 | 0.545 | 0.066 | 0.778 / 0.166 |
+| mix-ab4-llm6-30 | 14 | 29 | 0.886 / 0.086 | 0.303 | 0.047 | 0.728 / 0.141 |
+| **mix-ab4-lab-30** (varsayılan) | 14 | **21** | 0.883 / 0.084 | **0.258** | 0.050 | 0.730 / 0.140 |
+| soup04-lab | 14 | 12 | 0.864 / 0.083 | 0.015 | 0.016 | 0.662 / 0.113 |
+
+Diğer setlerde mix-ab4-lab-30 ile mix-ab4-llm6-30 arasındaki fark 1 puanın altında. Ölçüm payı küçük ve eğitimdeki
+etiketlerle aynı kaynaklardan geliyor; benzer satırlar içerebilir. soup04-lab gerçek yanlış alarmların çoğunu
+düzeltiyor ama Türkçe yakalamayı düşürdüğü için seçilmedi. mix-ab4-lab-30, 05.11.2026 akşamı varsayılan yapıldı
+(olasılık farkı 0.0000; int8 200 satırda 5 kararı değiştirdiği için silindi).
+
 **Rol istemleri ve `prompts/get`:** prompt sunucularının döndürdüğü şablonlar çoğunlukla rol veya sistem istemidir.
 Ölçüm için iki modelin de eğitimde görmediği 3.185 zararsız rol istemi kullanıldı (awesome-chatgpt-prompts CC0,
 System-Prompt-Library CC BY 4.0, llm-system-prompts-benchmark Apache-2.0; eğitimle çakışanlar çıkarıldı). Her
@@ -884,7 +906,8 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
    [training/redteam.py](training/redteam.py)): saldırıları ve zararsız metinleri JSON alanı, log satırı, kod yorumu,
    e-posta, belge notu gibi kılıflara sarıp modelin kaçırdıklarını ve yanlış alarmlarını, panelde etiketlenen olaylarla
    birlikte eğitim verisine çeviriyor. İlk üç tur varsayılan modeli geçemedi (kılıflı metinde yanlış alarm %8 → %4,5
-   inerken Türkçe saldırılarda isabet %89 → %83 düştü); varsayılan model soup04-ab4 olarak kaldı (05.11.2026'dan beri varsayılan mix-ab4-llm6-30)
+   inerken Türkçe saldırılarda isabet %89 → %83 düştü); varsayılan model soup04-ab4 olarak kaldı. 05.11.2026'da panelde etiketlenen 107 gerçek olayla ilk eğitim
+   yapıldı ("Panel etiketleriyle eğitim"); varsayılan model artık mix-ab4-lab-30
 2. Yol normalizasyonlu `paths` kısıtı — yapıldı (30.10.2026, yukarıda "Yol kısıtı")
 3. Oturum bazlı taint tracking — yapıldı (30.10.2026, yukarıda "Veri akışı takibi")
 4. Riskli çağrılar için human-in-the-loop onayı — yapıldı (30.10.2026, yukarıda "Kullanıcı onayı")

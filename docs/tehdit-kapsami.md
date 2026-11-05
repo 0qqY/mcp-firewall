@@ -10,8 +10,8 @@ Saldırılar üç gruba ayrıldı:
 
 Ölçümler mmBERT soup05-ab2'ye göre verilmiştir (eşik 0,9, 1500 karakterlik parçalar, firewall'un kod çözme ve
 gizleme geri alma adımlarından sonraki metin). 27.10.2026'dan önceki varsayılan v9'un değerleri parantez içinde.
-30.10.2026'dan beri varsayılan model soup04-ab4, 05.11.2026'dan beri mix-ab4-llm6-30; farkları "İyileştirmeler"
-21. ve 28. maddelerde.
+30.10.2026'dan beri varsayılan model soup04-ab4, 05.11.2026'dan beri mix-ab4-lab-30; farkları "İyileştirmeler"
+21., 28. ve 29. maddelerde.
 
 ## Firewall'un gördüğü ve görmediği trafik
 
@@ -221,6 +221,10 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
     kılıflı Türkçe setinde isabet %77,8'den %72,8'e indi (yanlış alarm %16,6'dan %14,1'e); kaçanların çoğu sohbet
     botuna yönelik tehdit ve zararlı istek. Diğer setlerde isabet kaybı 1 puanın altında. Node'da ONNX ile PyTorch
     arasında olasılık farkı 0,0000 (171/171 test).
+29. Varsayılan model mix-ab4-lab-30 oldu (05.11.2026 akşamı): llm6 tarifine panelde etiketlenmiş 107 gerçek olayın
+    %60'ı (10 kat) eklendi, aynı biçimde karıştırıldı (%70 ab4). Ayrılan 48 gerçek olayda (eşik 0,9) yanlış alarm
+    29/31'den 21/31'e indi, saldırı yakalama 14/17'de kaldı. Diğer setlerde mix-30 ile fark 1 puanın altında
+    (Türkçe 88,3 / 8,4; DeepSeek testinde yanlış alarm %25,8). Ölçüm payı küçük. 171/171 test.
 
 **Sıradakiler:**
 

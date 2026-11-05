@@ -482,3 +482,14 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     silindi), politika, demolar, test, README, tehdit kapsamı 28. madde, temizlik.ps1 (ab4 ve llm6 geri dönüş için
     korunuyor). Kurulu kopyada `policy.yaml` ve `policy-genel.yaml` yeni modele geçti (yedekler
     `*.yedek-2026-11-05`, ab4 klasörü yerinde). 171/171 test.
+83. **Panel etiketleriyle ilk eğitim, varsayılan mix-ab4-lab-30 (05.11.2026):** Yol haritası 1. Kayıttaki 115 etiket
+    (olay başına son kayıt, aynı metin bir kez) 107 satır: 33 saldırı, 74 zararsız; zararsızların çoğu modelin
+    gerçek yanlış alarmları (GitHub araç tanımları, base64'e benzeyen metinler, hata mesajları). Metnin SHA-256
+    özetiyle %60 eğitim (16 saldırı, 43 zararsız, 10 kat) / %40 ölçüm (17 / 31). v12llm6 + etiketler → lab
+    (93 dk), v4 ile 0,4 → soup04-lab, ab4 ile 0,3 → mix-ab4-lab-30. Ölçüm payında eşik 0,9 (yakalama / 17,
+    yanlış alarm / 31): ab4 13 / 30, mix-30 14 / 29, mix-lab-30 14 / 21, soup04-lab 14 / 12. mix-lab-30 diğer
+    setlerde mix-30 ile aynı düzeyde (Türkçe 88,3 / 8,4, DeepSeek testi yanlış alarm 30,3 → 25,8, devreal 4,7 →
+    5,0, kılıflı Türkçe 73,0 / 14,0, boundary 68,5 / 22,3); soup04-lab Türkçede 86,4, kılıflı Türkçede 66,2'ye
+    düştü. Kullanıcı onayıyla varsayılan yapıldı (fp32, olasılık farkı 0,0000; int8 5 karar değiştirdi, silindi).
+    Kurulu kopya yeni modele geçti (yedekler `*.yedek-2026-11-05b`), kurulu kod main ile aynı (`src.yedek-2026-11-05`).
+    Ölçüm payı küçük ve eğitimdekilerle aynı kaynaktan; etiketler depoda değil. 171/171 test.
