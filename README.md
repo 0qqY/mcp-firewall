@@ -412,11 +412,13 @@ Mesaj ─► Katman 1: kurallar, DLP, pinning ─► Katman 2: ML (tool tanımla
 - Mesaj sırası her yönde korunur; model hatasında `failMode` (varsayılan `closed`) uygulanır.
 - `Classifier` arayüzü ([src/ml/classifier.ts](src/ml/classifier.ts)) başka modellerin takılmasına izin verir.
 
-### Varsayılan model: mmBERT soup04-ab4
-[policy.example.yaml](policy.example.yaml) `./models/mcp-pi-mmbert-soup04-ab4` dizinini kullanır. Bu model çok dilli
-mmBERT-base'in (MIT) iki ince ayarının ağırlık ortalamasıdır: %60 v4 verisiyle, %40 çeviri, görev talimatı ve
-güvenlik mühendisliği verisiyle eğitilen ince ayar. Ölçümler aşağıda "Çok dilli eğitim ve mmBERT", "Görev talimatı
-verisi" ve "Güvenlik mühendisliği metni" başlıklarında.
+### Varsayılan model: mmBERT mix-ab4-llm6-30
+[policy.example.yaml](policy.example.yaml) `./models/mcp-pi-mmbert-mix-ab4-llm6-30` dizinini kullanır. Bu model çok
+dilli mmBERT-base'in (MIT) ince ayarlarının ağırlık ortalamasıdır. Temeli soup04-ab4: %60 v4 verisiyle, %40 çeviri,
+görev talimatı ve güvenlik mühendisliği verisiyle eğitilen ince ayar. Varsayılan model bunun %70'i ile, aynı tarife
+DeepSeek'in yazdığı araç çıktıları eklenerek eğitilen soup04-llm6'nın %30'udur. Ölçümler aşağıda "Çok dilli eğitim
+ve mmBERT", "Görev talimatı verisi", "Güvenlik mühendisliği metni" ve "DeepSeek ile üretilen araç çıktıları"
+başlıklarında.
 Eğitim verisinde MCPTox olduğu için (yazar izniyle, yeniden dağıtılamaz) model dağıtılmaz; `training/` içinde, açık
 veri setleri indirildikten sonra (aşağıdaki tablo) şöyle üretilir (iki eğitim RTX 5050'de ~100 dk; çeviri adımı
 ayrıca sürer):
@@ -444,6 +446,29 @@ python combine.py --a runs/mcp-pi-mmbert-v4/best --b runs/mcp-pi-mmbert-dev2/bes
 ```
 ```bash
 python export_onnx.py --model runs/mcp-pi-mmbert-soup04-ab4/best --out ../models/mcp-pi-mmbert-soup04-ab4
+```
+
+Varsayılan model için ayrıca DeepSeek verisi gerekir (`DEEPSEEK_API_KEY`; üretilen veri depoda yok, 665 çift
+~1,1 dolar tuttu). `data/v12llm6/train.jsonl` = `data/v12dev2/train.jsonl` + `data/llm_synth/train.jsonl` 6 kez arka
+arkaya; `val` ve `test` v12dev2'den kopyalanır:
+
+```bash
+python llm_synth.py --pairs 665
+```
+```bash
+python llm_synth.py --export data/llm_synth
+```
+```bash
+python train.py --base-model jhu-clsp/mmBERT-base --revision c595503 --lr 3e-5 --data data/v12llm6 --out runs/mcp-pi-mmbert-llm6
+```
+```bash
+python combine.py --a runs/mcp-pi-mmbert-v4/best --b runs/mcp-pi-mmbert-llm6/best --save-alpha 0.4 --out runs/mcp-pi-mmbert-soup04-llm6/best
+```
+```bash
+python combine.py --a runs/mcp-pi-mmbert-soup04-ab4/best --b runs/mcp-pi-mmbert-soup04-llm6/best --save-alpha 0.3 --out runs/mcp-pi-mmbert-mix-ab4-llm6-30/best
+```
+```bash
+python export_onnx.py --model runs/mcp-pi-mmbert-mix-ab4-llm6-30/best --out ../models/mcp-pi-mmbert-mix-ab4-llm6-30
 ```
 
 Ardından politikada `ml.enabled: true` yap. Yalnızca fp32 kullanılır (`ml.dtype: fp32`).
@@ -757,6 +782,27 @@ Saldırının görevini tekrarlayan zararsız eşleri çıkarmak (B5) kaçan Tü
 ONNX'te (fp32; int8 200 satırda 6 kararı değiştirdiği için silindi) Node, 798 satırda PyTorch ile aynı kararı
 veriyor. soup04-ab4, 30.10.2026'da soup05-ab2'nin yerine varsayılan model yapıldı.
 
+**DeepSeek ile üretilen araç çıktıları:** ab4, içinde meşru bir istek geçen araç çıktılarının (e-posta, bilet, log,
+README; "raporu cumaya kadar gönder") yarısını saldırı sayıyordu. `training/llm_synth.py` DeepSeek'e bu tür belgeler
+ve aynı belgenin yapay zekâya yönelik saldırı eklenmiş ikizini yazdırıyor (12 biçim, %60 Türkçe; takvim ve tablo
+yalnızca test bölümünde). 665 çift ab4 tarifine 6 kat eklenip eğitilen soup04-llm6 yanlış alarmları çok azalttı
+ama Türkçe isabeti düşürdü. İki modelin ağırlık ortalaması denendi (eşik 0.9, isabet / yanlış alarm):
+
+| Set | soup04-ab4 | **mix-30** (varsayılan) | mix-50 | soup04-llm6 |
+|---|---|---|---|---|
+| DeepSeek test bölümü (66 çift) | 0.924 / 0.545 | 0.909 / **0.303** | 0.924 / 0.136 | 0.939 / 0.015 |
+| Depodaki gerçek metinler (FPR) | 0.066 | **0.047** | 0.038 | 0.028 |
+| Red team kılıfları | 0.973 / 0.080 | 0.972 / **0.073** | 0.970 / 0.065 | 0.968 / 0.048 |
+| Türkçe saldırılar / zararsız | 0.890 / 0.087 | **0.886 / 0.086** | 0.871 / 0.092 | 0.849 / 0.120 |
+| Kılıflı Türkçe (dış setler) | 0.778 / 0.166 | 0.728 / 0.141 | 0.701 / 0.128 | 0.641 / 0.108 |
+| Sınır çiftleri | 0.697 / 0.242 | 0.687 / 0.215 | 0.668 / 0.217 | 0.640 / 0.212 |
+| İç test | 0.986 / 0.039 | 0.984 / 0.037 | 0.983 / 0.034 | 0.982 / 0.027 |
+
+mix-30 Türkçeyi ab4 düzeyinde tutup yanlış alarmı her sette azaltan tek oran. Bedeli: kılıflı Türkçe setinde isabet
+5 puan düştü; kaçanların çoğu sohbet botuna yönelik tehdit ve zararlı istek, firewall'un korumaya çalıştığı kanal
+değil. DeepSeek test bölümü küçük ve eğitimle aynı üreteçten geliyor. mix-30, 05.11.2026'da varsayılan yapıldı
+(ONNX ile PyTorch arasında olasılık farkı 0.0000; int8 200 satırda 8 kararı değiştirdiği için silindi).
+
 **Rol istemleri ve `prompts/get`:** prompt sunucularının döndürdüğü şablonlar çoğunlukla rol veya sistem istemidir.
 Ölçüm için iki modelin de eğitimde görmediği 3.185 zararsız rol istemi kullanıldı (awesome-chatgpt-prompts CC0,
 System-Prompt-Library CC BY 4.0, llm-system-prompts-benchmark Apache-2.0; eğitimle çakışanlar çıkarıldı). Her
@@ -838,7 +884,7 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
    [training/redteam.py](training/redteam.py)): saldırıları ve zararsız metinleri JSON alanı, log satırı, kod yorumu,
    e-posta, belge notu gibi kılıflara sarıp modelin kaçırdıklarını ve yanlış alarmlarını, panelde etiketlenen olaylarla
    birlikte eğitim verisine çeviriyor. İlk üç tur varsayılan modeli geçemedi (kılıflı metinde yanlış alarm %8 → %4,5
-   inerken Türkçe saldırılarda isabet %89 → %83 düştü); varsayılan model soup04-ab4 olarak kaldı
+   inerken Türkçe saldırılarda isabet %89 → %83 düştü); varsayılan model soup04-ab4 olarak kaldı (05.11.2026'dan beri varsayılan mix-ab4-llm6-30)
 2. Yol normalizasyonlu `paths` kısıtı — yapıldı (30.10.2026, yukarıda "Yol kısıtı")
 3. Oturum bazlı taint tracking — yapıldı (30.10.2026, yukarıda "Veri akışı takibi")
 4. Riskli çağrılar için human-in-the-loop onayı — yapıldı (30.10.2026, yukarıda "Kullanıcı onayı")

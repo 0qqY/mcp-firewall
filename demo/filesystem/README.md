@@ -11,7 +11,7 @@ npm run build
 node demo/filesystem/run.mjs
 ```
 
-Model depoda tutulmaz; `MCP_FIREWALL_MODEL` ile yolunu verin (varsayılan `./models/mcp-pi-mmbert-soup04-ab4`).
+Model depoda tutulmaz; `MCP_FIREWALL_MODEL` ile yolunu verin (varsayılan `./models/mcp-pi-mmbert-mix-ab4-llm6-30`).
 İlk çalıştırmada `npx` sunucuyu indirir (ağ gerekir). Windows'ta checkout yolunu kısa tutun —
 `npx` çok derin bir dizinden başlayamaz.
 

@@ -11,7 +11,7 @@ npm run build
 node demo/sql/run.mjs
 ```
 
-Model depoda tutulmaz; `MCP_FIREWALL_MODEL` ile yolunu verin (varsayılan `./models/mcp-pi-mmbert-soup04-ab4`).
+Model depoda tutulmaz; `MCP_FIREWALL_MODEL` ile yolunu verin (varsayılan `./models/mcp-pi-mmbert-mix-ab4-llm6-30`).
 Kendi kendine yeter; dış ağ gerekmez.
 
 ## Kapsanan 12 sorgu

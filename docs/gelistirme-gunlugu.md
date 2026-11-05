@@ -470,3 +470,15 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     0,880). soup04-llm3 Türkçede daha az bozuldu (88,0 / 10,3) ama kazancı da azaldı. Varsayılan ab4 kaldı.
     Aynı üreteçten gelen test bölümü küçük ve dağılımı eğitimle aynı; Türkçe kaybı gerçek. Sonraki deneme için daha
     fazla ve Türkçesi daha doğal veri gerekiyor (bakiye yüklenmesi kullanıcının kararı).
+
+82. **Varsayılan model mix-ab4-llm6-30 (05.11.2026):** Yeni eğitim yapılmadan ab4 ile soup04-llm6'nın ağırlık
+    ortalaması alındı (`combine.py`, llm6 payı 0,3 ve 0,5). Eşik 0,9, isabet / yanlış alarm, ab4 → mix-30 → mix-50 →
+    llm6: DeepSeek testi 92,4 / 54,5 → 90,9 / 30,3 → 92,4 / 13,6 → 93,9 / 1,5; devreal yanlış alarm 6,6 → 4,7 → 3,8
+    → 2,8; red team kılıfları 97,3 / 8,0 → 97,2 / 7,3 → 97,0 / 6,5 → 96,8 / 4,8; Türkçe 89,0 / 8,7 → 88,6 / 8,6 →
+    87,1 / 9,2 → 84,9 / 12,0; kılıflı Türkçe 77,8 / 16,6 → 72,8 / 14,1 → 70,1 / 12,8 → 64,1 / 10,8; boundary 69,7 /
+    24,2 → 68,7 / 21,5 → 66,8 / 21,7 → 64,0 / 21,2. mix-30 Türkçeyi ab4 düzeyinde tutup her sette yanlış alarmı
+    azaltıyor; bedeli kılıflı Türkçede 5 puan isabet (kaçanlar çoğunlukla sohbet botuna tehdit ve zararlı istek).
+    Kullanıcı onayıyla varsayılan yapıldı: ONNX (fp32; olasılık farkı 0,0000, int8 200 satırda 8 karar değiştirdi,
+    silindi), politika, demolar, test, README, tehdit kapsamı 28. madde, temizlik.ps1 (ab4 ve llm6 geri dönüş için
+    korunuyor). Kurulu kopyada `policy.yaml` ve `policy-genel.yaml` yeni modele geçti (yedekler
+    `*.yedek-2026-11-05`, ab4 klasörü yerinde). 171/171 test.

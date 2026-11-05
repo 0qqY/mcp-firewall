@@ -3,8 +3,8 @@
 #   powershell -ExecutionPolicy Bypass -File temizlik.ps1          # listele, onaylanırsa sil
 #   powershell -ExecutionPolicy Bypass -File temizlik.ps1 -Liste   # yalnızca listele
 #
-# Kalanlar: models/mcp-pi-mmbert-soup04-ab4 (varsayılan model), models/mcp-pi-mmbert-soup05-ab2 ve
-# models/mcp-pi-mmbert-soup05 (önceki varsayılanlar, geri dönmek için), models/protectai-deberta-v3-pi-v2 (hazır baseline, test yedeği), training/runs altında iki
+# Kalanlar: models/mcp-pi-mmbert-mix-ab4-llm6-30 (varsayılan model), models/mcp-pi-mmbert-soup04-ab4,
+# models/mcp-pi-mmbert-soup05-ab2 ve models/mcp-pi-mmbert-soup05 (önceki varsayılanlar, geri dönmek için), models/protectai-deberta-v3-pi-v2 (hazır baseline, test yedeği), training/runs altında iki
 # soup'un ve bileşenlerinin best klasörleri (yeniden karıştırma ve değerlendirme için), görev talimatı
 # denemelerinin best klasörleri, training/runs/mcp-pi-v9 (gerekirse v9'a dönmek için), eğitim verisi, loglar,
 # eğitim ortamı (venv) ve mmBERT-base önbelleği.
@@ -44,7 +44,8 @@ foreach ($h in 'models--answerdotai--ModernBERT-base', 'models--microsoft--deber
     $targets += Join-Path $hub $h
 }
 
-$keep = @((Join-Path $root 'models\mcp-pi-mmbert-soup04-ab4'), (Join-Path $root 'models\mcp-pi-mmbert-soup05-ab2'),
+$keep = @((Join-Path $root 'models\mcp-pi-mmbert-mix-ab4-llm6-30'), (Join-Path $runs 'mcp-pi-mmbert-mix-ab4-llm6-30'),
+          (Join-Path $runs 'mcp-pi-mmbert-soup04-llm6'), (Join-Path $root 'models\mcp-pi-mmbert-soup04-ab4'), (Join-Path $root 'models\mcp-pi-mmbert-soup05-ab2'),
           (Join-Path $root 'models\mcp-pi-mmbert-soup05'),
           (Join-Path $runs 'mcp-pi-mmbert-soup04-ab4'), (Join-Path $runs 'mcp-pi-mmbert-soup05-ab2'), (Join-Path $runs 'mcp-pi-mmbert-soup05'),
           (Join-Path $runs 'mcp-pi-mmbert\best'), (Join-Path $runs 'mcp-pi-mmbert-v4\best'), (Join-Path $runs 'mcp-pi-mmbert-task\best'),
@@ -66,5 +67,5 @@ if ($Liste) { return }
 if ((Read-Host 'Bunlar kalıcı olarak silinsin mi? (e/h)') -ne 'e') { 'İptal edildi.'; return }
 foreach ($r in $rows) { Remove-Item -LiteralPath $r.Tam -Recurse -Force }
 "Silindi: $total GB."
-if (-not (Test-Path (Join-Path $root 'models\mcp-pi-mmbert-soup04-ab4\onnx\model.onnx'))) { throw 'varsayılan model bulunamadı!' }
-'Varsayılan model yerinde: models\mcp-pi-mmbert-soup04-ab4'
+if (-not (Test-Path (Join-Path $root 'models\mcp-pi-mmbert-mix-ab4-llm6-30\onnx\model.onnx'))) { throw 'varsayılan model bulunamadı!' }
+'Varsayılan model yerinde: models\mcp-pi-mmbert-mix-ab4-llm6-30'

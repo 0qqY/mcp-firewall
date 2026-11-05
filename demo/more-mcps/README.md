@@ -16,7 +16,7 @@ node demo/more-mcps/docs-run.mjs
 node demo/more-mcps/plug-run.mjs
 ```
 
-ML kullanan demolar için model: `MCP_FIREWALL_MODEL` ile yol verin (varsayılan `./models/mcp-pi-mmbert-soup04-ab4`).
+ML kullanan demolar için model: `MCP_FIREWALL_MODEL` ile yol verin (varsayılan `./models/mcp-pi-mmbert-mix-ab4-llm6-30`).
 `plug` ML kullanmaz. `docs` ve `plug` rug-pull'u göstermek için sunucuyu **iki kez** çalıştırır (ikincisinde
 `RUG=1` ile tanım/şablon sessizce değişir).
 

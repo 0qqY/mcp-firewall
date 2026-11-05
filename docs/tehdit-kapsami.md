@@ -10,7 +10,8 @@ Saldırılar üç gruba ayrıldı:
 
 Ölçümler mmBERT soup05-ab2'ye göre verilmiştir (eşik 0,9, 1500 karakterlik parçalar, firewall'un kod çözme ve
 gizleme geri alma adımlarından sonraki metin). 27.10.2026'dan önceki varsayılan v9'un değerleri parantez içinde.
-30.10.2026'dan beri varsayılan model soup04-ab4; farkları "İyileştirmeler" 21. maddede.
+30.10.2026'dan beri varsayılan model soup04-ab4, 05.11.2026'dan beri mix-ab4-llm6-30; farkları "İyileştirmeler"
+21. ve 28. maddelerde.
 
 ## Firewall'un gördüğü ve görmediği trafik
 
@@ -213,11 +214,19 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
     kuyruk yerel; makineyi ele geçiren biri kayıtları gönderilmeden silebilir. OpenObserve ve Fluent Bit ile gerçek
     SIEM'de denendi. 150/150 test (ML dahil).
 
+28. Varsayılan model mix-ab4-llm6-30 oldu (05.11.2026): ab4 ile DeepSeek verisiyle eğitilen soup04-llm6'nın
+    ağırlık ortalaması (%70 ab4, %30 llm6), yeni eğitim yok. Eşik 0,9'da ab4'e göre: içinde meşru istek geçen araç
+    çıktılarında (DeepSeek test bölümü) yanlış alarm %54,5'ten %30,3'e, depodaki gerçek metinlerde %6,6'dan %4,7'ye,
+    red team kılıflarında %8,0'dan %7,3'e indi. Türkçe 89,0 / 8,7 → 88,6 / 8,6 (isabet / yanlış alarm). Bedeli:
+    kılıflı Türkçe setinde isabet %77,8'den %72,8'e indi (yanlış alarm %16,6'dan %14,1'e); kaçanların çoğu sohbet
+    botuna yönelik tehdit ve zararlı istek. Diğer setlerde isabet kaybı 1 puanın altında. Node'da ONNX ile PyTorch
+    arasında olasılık farkı 0,0000 (171/171 test).
+
 **Sıradakiler:**
 
 1. "Görev talimatı" metinlerinde kalan yanlış alarm (Türkçe benchmark %33, iç testte İngilizce %53) ve dış Türkçe setlerdeki düşük isabet (%48–65).
 2. Belgelere eklenecek tavsiyeler: sunucuları sandbox veya container içinde ve sınırlı ağ erişimiyle çalıştırmak; paket sürümünü sabitlemek.
-3. Güvenlik konulu zararsız metinlerde kalan yanlış alarm: soup04-ab4 depodaki Markdown paragraflarının %11'ini hâlâ saldırı sayıyor (çoğu saldırı örneği içeren belgeler). Sınır çiftleri setinde RAG bağlamı zehirleme isabeti %66'dan %58'e indi.
+3. Güvenlik konulu zararsız metinlerde kalan yanlış alarm (ölçüm soup04-ab4 ile; mix-30'da depodaki metinlerde %6,6 → %4,7): soup04-ab4 depodaki Markdown paragraflarının %11'ini hâlâ saldırı sayıyor (çoğu saldırı örneği içeren belgeler). Sınır çiftleri setinde RAG bağlamı zehirleme isabeti %66'dan %58'e indi.
 
 ## Kaynaklar
 
