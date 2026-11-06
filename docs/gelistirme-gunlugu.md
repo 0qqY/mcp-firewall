@@ -493,3 +493,14 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     düştü. Kullanıcı onayıyla varsayılan yapıldı (fp32, olasılık farkı 0,0000; int8 5 karar değiştirdi, silindi).
     Kurulu kopya yeni modele geçti (yedekler `*.yedek-2026-11-05b`), kurulu kod main ile aynı (`src.yedek-2026-11-05`).
     Ölçüm payı küçük ve eğitimdekilerle aynı kaynaktan; etiketler depoda değil. 171/171 test.
+84. **Görev talimatı verisini genişletme, olumsuz sonuç (06.11.2026):** Yol haritası 7. `task_prompts.py` listelerin sonuna
+    eklemeyle genişledi (eski şablonların eğitim/ölçüm ayrımı kaymadı): 35 İngilizce, 16 Türkçe müşteri mesajı, her
+    talimat ailesine yeni ifadeler, `format` ve `check` aileleri, 5 yeni yerleşim. v12lab'e 9024 satır eklendi (71.566
+    satır); task2 → v4 ile 0,4 → soup04-task2, ab4 ile 0,3 → mix-ab4-task2-30 (110 dk). Eşik 0,9, yanlış alarm
+    (varsayılan mix-lab-30 → mix-task2-30): bağımsız Türkçe benchmark görev talimatı %21,7 → %24,8, Türkçe genel 8,4 →
+    9,7, DeepSeek testi 25,8 → 30,3, sınır çiftleri 22,3 → 24,3, rol istemi kitaplığı 85,0 → 82,1; yakalama aynı.
+    soup04-task2 kendi Türkçe test setimizde %22,8 → %2,8 ama benchmark %40,3, Türkçe genel %15,1. Şablonla üretilen
+    veri şablonları öğretiyor, kavramı değil. Varsayılan model mix-ab4-lab-30 kaldı. Ölçüm uyarısı: İngilizce test
+    kümesi yalnızca 6 ayrı mesaj şablonundan geliyor; e-posta içeren 147 satırın hepsi tek şablon ve her model onu %99
+    saldırı sayıyor (eğitimde 1771 benzer örnek olmasına rağmen), yani İngilizce %50'lik yanlış alarm zayıf bir ölçüm.
+    Gerçek ilerleme için doğal, çeşitli metin (LLM ile yazılmış, ≈0,17 $/100 çift) ya da panel etiketleri gerekiyor.
