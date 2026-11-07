@@ -10,3 +10,4 @@ training/data/
 training/runs/
 __pycache__/
 demo/**/run-*
+poligon/.calisma/
