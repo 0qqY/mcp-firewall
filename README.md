@@ -866,7 +866,7 @@ alarm %, firewall biçimi (1500 karakterlik pencere):
 | devreal (gerçek MCP metinleri) | – / 5.0 | – / 0.9 | – / 2.2 |
 | rt (red team) | 97.2 / 7.2 | 94.9 / 3.3 | 96.5 / 4.9 |
 | tr (Türkçe benchmark) | 88.3 / 8.4 | 88.3 / 5.2 | 91.5 / 7.4 |
-| ind (dolaylı enjeksiyon) | 94.9 / 67.4 | 86.4 / 59.7 | 91.2 / 64.0 |
+| ind (bağımsız set: LLMail-Inject e-postaları + gerçek dünyadan istemler) | 94.9 / 67.4 | 86.4 / 59.7 | 91.2 / 64.0 |
 | obf (gizlenmiş) | 98.1 / 6.3 | 92.6 / 4.9 | 95.3 / 5.7 |
 | ml (çok dilli) | 97.8 / 1.8 | 93.3 / 0.6 | 95.8 / 1.4 |
 | wtr (kılıflı Türkçe) | 73.0 / 14.0 | 65.4 / 8.3 | 73.3 / 12.1 |
@@ -880,6 +880,12 @@ wtr, hfho, tr, boundary, test, llm, lab ve devreal kümelerinde hem yakalamada h
 yakalamada yalnız ind −3,7, obf −2,8, ml −2,0 ve rt −0,7 puan kaybediyor (bunlarda yanlış alarm daha düşük). Zayıf
 nokta: veri setindeki rug pull örneklerinin yakalaması 0.9 ve 0.5'te %52, 0.3'te %60; rug pull'a karşı asıl savunma
 araç sabitleme (pinning) olarak kalıyor. Gerçek olaylarda (lab) yanlış alarm 0.3'te hâlâ %45.
+
+`ind` satırındaki yüksek yanlış alarm e-postalardan gelmiyor: sıradan Discord/Reddit istemleri (itw_regular) %66–75
+işaretleniyor, organizatörlerin yayımladığı 160 zararsız e-posta (llmail_fp) her iki modelde ve her iki eşikte 0/160.
+E-posta saldırılarında ise yeni model öncekinden geride: başarılı LLMail saldırılarında yakalama önceki varsayılanda
+%99 (eşik 0.9), yenide %86 (0.9) ve %92 (0.3); diğer saldırı denemelerinde %95, %82 ve %89. E-posta ve takvim gibi
+kanallar için önceki model (mix-ab4-lab-30, eşik 0.9) bu sette daha iyi.
 
 **Rol istemleri ve `prompts/get`:** prompt sunucularının döndürdüğü şablonlar çoğunlukla rol veya sistem istemidir.
 Ölçüm için iki modelin de eğitimde görmediği 3.185 zararsız rol istemi kullanıldı (awesome-chatgpt-prompts CC0,
