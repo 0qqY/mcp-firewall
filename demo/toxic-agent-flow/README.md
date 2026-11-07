@@ -14,7 +14,7 @@ npm run build
 node demo/toxic-agent-flow/run.mjs
 ```
 
-Model depoda tutulmuyor; `MCP_FIREWALL_MODEL` ile yolunu verin (varsayılan `./models/mcp-pi-mmbert-mix-ab4-lab-30`).
+Model depoda tutulmuyor; `MCP_FIREWALL_MODEL` ile yolunu verin (varsayılan `./models/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30`).
 Denetim ve pin dosyaları bu klasöre yazılır; kurulu bir firewall'a dokunmaz.
 
 ## Beklenen sonuç

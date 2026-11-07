@@ -136,12 +136,13 @@ taint:
 # Katman 2: ML prompt-injection sınıflandırıcısı (yerel ONNX, internete çıkmaz)
 ml:
   enabled: false
-  model: ./models/mcp-pi-mmbert-mix-ab4-lab-30   # transformers.js uyumlu dizin (README: "Varsayılan model")
+  model: ./models/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30   # transformers.js uyumlu dizin (README: "Varsayılan model")
                                              # hazır baseline: ./models/protectai-deberta-v3-pi-v2 (fetch_baseline.ps1)
   dtype: fp32                 # fp32 (onnx/model.onnx) | q8 (onnx/model_quantized.onnx; yalnızca export_onnx.py
                               # int8 kontrolünü geçen modellerde bulunur, mmBERT ve DeBERTa'da geçmiyor)
   injectionLabel: INJECTION   # modelin pozitif sınıf etiketi
-  threshold: 0.9              # bu skor ve üstü ihlal sayılır
+  threshold: 0.3              # bu skor ve üstü ihlal sayılır. 0.3 varsayılan modele (mixraw-ab4-evilsandangels-30)
+                              # göre ayarlı: bu karışımın skorları daha düşük çıkar. Başka modelde (ör. baseline) 0.9 kullan
   failMode: closed            # closed: model hatası = ihlal | open: uyar ve geçir
   chunkChars: 1500            # uzun metinler örtüşen parçalara bölünür
   maxChunks: 32               # fazlası olursa baştan ve sondan taranır

@@ -14,7 +14,7 @@ const { policy, audit } = writePolicy(here, 'docs', [
   `pinning: { enabled: true, file: ${JSON.stringify(pins)}, onChange: hide, prompts: block, serverCode: off }`,
   'dlp: { enabled: true, action: redact }',
   'ml:', '  enabled: true', `  model: ${JSON.stringify(MODEL)}`,
-  '  threshold: 0.9', '  scan: { promptResults: warn }',
+  '  threshold: 0.3', '  scan: { promptResults: warn }',
 ]);
 
 const base = [

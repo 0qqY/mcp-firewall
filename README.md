@@ -412,13 +412,17 @@ Mesaj ─► Katman 1: kurallar, DLP, pinning ─► Katman 2: ML (tool tanımla
 - Mesaj sırası her yönde korunur; model hatasında `failMode` (varsayılan `closed`) uygulanır.
 - `Classifier` arayüzü ([src/ml/classifier.ts](src/ml/classifier.ts)) başka modellerin takılmasına izin verir.
 
-### Varsayılan model: mmBERT mix-ab4-lab-30
-[policy.example.yaml](policy.example.yaml) `./models/mcp-pi-mmbert-mix-ab4-lab-30` dizinini kullanır. Bu model çok
-dilli mmBERT-base'in (MIT) ince ayarlarının ağırlık ortalamasıdır. Temeli soup04-ab4: %60 v4 verisiyle, %40 çeviri,
-görev talimatı ve güvenlik mühendisliği verisiyle eğitilen ince ayar. Varsayılan model bunun %70'i ile, aynı tarife
-DeepSeek'in yazdığı araç çıktıları ve panelde etiketlenmiş gerçek olaylar eklenerek eğitilen soup04-lab'ın %30'udur. Ölçümler aşağıda "Çok dilli eğitim
-ve mmBERT", "Görev talimatı verisi", "Güvenlik mühendisliği metni", "DeepSeek ile üretilen araç çıktıları" ve
-"Panel etiketleriyle eğitim" başlıklarında.
+### Varsayılan model: mmBERT mixraw-ab4-evilsandangels-30
+[policy.example.yaml](policy.example.yaml) `./models/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30` dizinini ve
+`ml.threshold: 0.3` değerini kullanır. Bu model çok dilli mmBERT-base'in (MIT) ince ayarlarının ağırlık ortalamasıdır.
+Temeli soup04-ab4: %60 v4 verisiyle, %40 çeviri, görev talimatı ve güvenlik mühendisliği verisiyle eğitilen ince ayar.
+Varsayılan model bunun %70'i ile, v12lab verisine (DeepSeek'in yazdığı araç çıktıları ve panelde etiketlenmiş gerçek
+olaylar) ikiz veri seti evilsandangels eklenerek eğitilen ham modelin (soup'a katılmamış ağırlıklar) %30'udur. Skorlar
+önceki varsayılandan düşük çıktığı için eşik 0.9 değil 0.3'tür; 0.9'da yakalama 7 kümede düşer ("evilsandangels ikiz
+veri seti" bölümü). Önceki varsayılan mix-ab4-lab-30 (eşik 0.9) `models/` altında duruyor, geri dönmek için
+`ml.model` ve `ml.threshold` değerlerini değiştirmek yeter. Ölçümler aşağıda "Çok dilli eğitim
+ve mmBERT", "Görev talimatı verisi", "Güvenlik mühendisliği metni", "DeepSeek ile üretilen araç çıktıları",
+"Panel etiketleriyle eğitim" ve "evilsandangels ikiz veri seti" başlıklarında.
 Eğitim verisinde MCPTox olduğu için (yazar izniyle, yeniden dağıtılamaz) model dağıtılmaz; `training/` içinde, açık
 veri setleri indirildikten sonra (aşağıdaki tablo) şöyle üretilir (iki eğitim RTX 5050'de ~100 dk; çeviri adımı
 ayrıca sürer):
@@ -477,7 +481,27 @@ kayıt, aynı metin bir kez) metnin SHA-256 özetine göre %60 eğitim / %40 öl
 runs/mcp-pi-mmbert-lab`, v4 ile 0.4 çorbası soup04-lab, ab4 ile 0.3 karışımı mix-ab4-lab-30). Etiketler kendi
 kayıtlarınızdan gelir; bu depodaki model sahibinin 107 etiketiyle eğitildi.
 
-Ardından politikada `ml.enabled: true` yap. Yalnızca fp32 kullanılır (`ml.dtype: fp32`).
+Son adım ikiz veri seti evilsandangels (4 kategori: dolaylı enjeksiyon, bellek zehirleme, istem enjeksiyonu, rug pull;
+her zararlı örneğe temiz ikiz, `pair_id` bölmeleri, İngilizce/Türkçe; veri seti depoda yok, kendi kopyanın yolunu ver).
+`evilsandangels_data.py` onu `data/v12eva`'ya (v12lab + veri seti) çevirir; ham model ayrı eğitilir ve soup04-ab4 ile
+ağırlık ortalaması alınır:
+
+```bash
+python -I evilsandangels_data.py "D:/Ai Attack Dataset (Evil and Clean twins)/dataset"
+```
+```bash
+python train.py --base-model jhu-clsp/mmBERT-base --revision c595503 --lr 3e-5 --data data/v12eva --out runs/mcp-pi-mmbert-evilsandangels
+```
+```bash
+python combine.py --a runs/mcp-pi-mmbert-soup04-ab4/best --b runs/mcp-pi-mmbert-evilsandangels/best --save-alpha 0.3 --out runs/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30/best
+```
+```bash
+python export_onnx.py --model runs/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30/best --out ../models/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30
+```
+
+Ardından politikada `ml.enabled: true` yap. Yalnızca fp32 kullanılır (`ml.dtype: fp32`). Eşik modele bağlıdır:
+varsayılan model için 0.3, öncekiler (mix-ab4-lab-30, soup04-ab4) ve baseline için 0.9. Kodun varsayılanı 0.9'da
+kaldı; politikada `ml.threshold` yazmayan bir kurulum yeni modelle 0.9'da çalışır.
 
 ### Baseline
 ```bash
@@ -825,6 +849,38 @@ etiketlerle aynı kaynaklardan geliyor; benzer satırlar içerebilir. soup04-lab
 düzeltiyor ama Türkçe yakalamayı düşürdüğü için seçilmedi. mix-ab4-lab-30, 05.11.2026 akşamı varsayılan yapıldı
 (olasılık farkı 0.0000; int8 200 satırda 5 kararı değiştirdiği için silindi).
 
+**evilsandangels ikiz veri seti:** 7.996 satır, 4 kategori, her zararlı örneğe temiz ikiz. Veri setinin kendi test
+bölmesi iyimser (zararlı ifadelerin ≈%55'i eğitimde de geçiyor), bu yüzden karar 16 bağımsız kümede verildi. Ham
+evilsandangels modeli veri setinde %100 / %0, ama yalnız veri setiyle eğitim aşırı uyuyor (devreal yanlış alarm
+%5 → %39). Kontrol modeli (aynı tarif, veri seti yok) lab ve llm yanlış alarmını zaten 0'a indiriyor; kazancın çoğu
+ham ağırlıkla soup arasındaki farktan geliyor, veri setinden değil. Veri setinin kendi etkisi (kontrole göre): tr
+yanlış alarm %1,5 → %8,2, rt yakalama %95 → %85,7, wtr yakalama %50 → %63. Denenen karışım oranlarından %30 seçildi
+(%50'de 0.9 eşiğinde yakalama ind −18,7, obf −14,2, wtr −11,2, ml −11,1 puan düşüyordu). Hücreler yakalama / yanlış
+alarm %, firewall biçimi (1500 karakterlik pencere):
+
+| Set | önceki varsayılan, eşik 0.9 | yeni varsayılan, eşik 0.9 | yeni varsayılan, eşik 0.3 |
+|---|---|---|---|
+| eva (veri setinin testi) | 80.9 / 32.8 | 88.5 / 6.9 | 90.4 / 11.0 |
+| lab (panel etiketleri, ayrılan pay) | 82.4 / 67.7 | 82.4 / 22.6 | 82.4 / 45.2 |
+| llm (DeepSeek testi) | 90.9 / 25.8 | 92.4 / 3.0 | 92.4 / 6.1 |
+| devreal (gerçek MCP metinleri) | – / 5.0 | – / 0.9 | – / 2.2 |
+| rt (red team) | 97.2 / 7.2 | 94.9 / 3.3 | 96.5 / 4.9 |
+| tr (Türkçe benchmark) | 88.3 / 8.4 | 88.3 / 5.2 | 91.5 / 7.4 |
+| ind (dolaylı enjeksiyon) | 94.9 / 67.4 | 86.4 / 59.7 | 91.2 / 64.0 |
+| obf (gizlenmiş) | 98.1 / 6.3 | 92.6 / 4.9 | 95.3 / 5.7 |
+| ml (çok dilli) | 97.8 / 1.8 | 93.3 / 0.6 | 95.8 / 1.4 |
+| wtr (kılıflı Türkçe) | 73.0 / 14.0 | 65.4 / 8.3 | 73.3 / 12.1 |
+| boundary (sınır çiftleri) | 68.5 / 22.3 | 67.8 / 16.5 | 74.0 / 20.8 |
+| test (genel test seti) | 98.4 / 3.9 | 97.6 / 2.0 | 98.5 / 2.7 |
+
+0.9'da yanlış alarm her kümede düşer ama yakalama 7 kümede düşer (ind −8,5, wtr −7,6, obf −5,4, hftr −5,0, ml −4,6,
+hfho −3,0, rt −2,3). Eşit yanlış alarmda gerçek sıralama kaybı küçük (ind −1,5, obf −1,1, ml −0,7; diğer kümelerde
+önceki varsayılana eşit ya da önde), yani düşüşün çoğu eşik kayması; bu yüzden eşik 0.3. 0.3'te yeni model
+wtr, hfho, tr, boundary, test, llm, lab ve devreal kümelerinde hem yakalamada hem yanlış alarmda öncekinden iyi;
+yakalamada yalnız ind −3,7, obf −2,8, ml −2,0 ve rt −0,7 puan kaybediyor (bunlarda yanlış alarm daha düşük). Zayıf
+nokta: veri setindeki rug pull örneklerinin yakalaması 0.9 ve 0.5'te %52, 0.3'te %60; rug pull'a karşı asıl savunma
+araç sabitleme (pinning) olarak kalıyor. Gerçek olaylarda (lab) yanlış alarm 0.3'te hâlâ %45.
+
 **Rol istemleri ve `prompts/get`:** prompt sunucularının döndürdüğü şablonlar çoğunlukla rol veya sistem istemidir.
 Ölçüm için iki modelin de eğitimde görmediği 3.185 zararsız rol istemi kullanıldı (awesome-chatgpt-prompts CC0,
 System-Prompt-Library CC BY 4.0, llm-system-prompts-benchmark Apache-2.0; eğitimle çakışanlar çıkarıldı). Her
@@ -907,7 +963,8 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
    e-posta, belge notu gibi kılıflara sarıp modelin kaçırdıklarını ve yanlış alarmlarını, panelde etiketlenen olaylarla
    birlikte eğitim verisine çeviriyor. İlk üç tur varsayılan modeli geçemedi (kılıflı metinde yanlış alarm %8 → %4,5
    inerken Türkçe saldırılarda isabet %89 → %83 düştü); varsayılan model soup04-ab4 olarak kaldı. 05.11.2026'da panelde etiketlenen 107 gerçek olayla ilk eğitim
-   yapıldı ("Panel etiketleriyle eğitim"); varsayılan model artık mix-ab4-lab-30
+   yapıldı ("Panel etiketleriyle eğitim"); varsayılan model mix-ab4-lab-30 oldu; 07.11.2026'da ikiz veri seti evilsandangels eklenen mixraw-ab4-evilsandangels-30
+   (eşik 0.3) onun yerine geçti
 2. Yol normalizasyonlu `paths` kısıtı — yapıldı (30.10.2026, yukarıda "Yol kısıtı")
 3. Oturum bazlı taint tracking — yapıldı (30.10.2026, yukarıda "Veri akışı takibi")
 4. Riskli çağrılar için human-in-the-loop onayı — yapıldı (30.10.2026, yukarıda "Kullanıcı onayı")

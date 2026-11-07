@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..', '..');
 const cli = join(repo, 'dist', 'src', 'cli.js');
-const model = process.env.MCP_FIREWALL_MODEL ?? join(repo, 'models', 'mcp-pi-mmbert-mix-ab4-lab-30');
+const model = process.env.MCP_FIREWALL_MODEL ?? join(repo, 'models', 'mcp-pi-mmbert-mixraw-ab4-evilsandangels-30');
 if (!existsSync(cli)) throw new Error(`build first (npm run build): ${cli} is missing`);
 if (!existsSync(model)) throw new Error(`model not found: ${model}. Set MCP_FIREWALL_MODEL to its path.`);
 
@@ -32,7 +32,7 @@ writeFileSync(policyFile, [
   `pinning: { enabled: true, file: ${JSON.stringify(pinFile)}, onChange: hide }`,
   'dlp: { enabled: true, action: redact }',
   'ml:', '  enabled: true', `  model: ${JSON.stringify(model)}`,
-  '  threshold: 0.9', '  scan: { toolResults: block }', '',
+  '  threshold: 0.3', '  scan: { toolResults: block }', '',
 ].join('\n'));
 
 // The firewall wraps the official server. cwd is a short temp dir so the npx-spawned node can start even when

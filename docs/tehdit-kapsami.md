@@ -10,8 +10,9 @@ Saldırılar üç gruba ayrıldı:
 
 Ölçümler mmBERT soup05-ab2'ye göre verilmiştir (eşik 0,9, 1500 karakterlik parçalar, firewall'un kod çözme ve
 gizleme geri alma adımlarından sonraki metin). 27.10.2026'dan önceki varsayılan v9'un değerleri parantez içinde.
-30.10.2026'dan beri varsayılan model soup04-ab4, 05.11.2026'dan beri mix-ab4-lab-30; farkları "İyileştirmeler"
-21., 28. ve 29. maddelerde.
+30.10.2026'dan beri varsayılan model soup04-ab4, 05.11.2026'dan beri mix-ab4-lab-30, 07.11.2026'dan beri
+mixraw-ab4-evilsandangels-30 (eşik 0,3; tablodaki ölçümler önceki modellerle 0,9'da yapıldı); farkları "İyileştirmeler"
+21., 28., 29. ve 30. maddelerde.
 
 ## Firewall'un gördüğü ve görmediği trafik
 
@@ -225,6 +226,14 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
     %60'ı (10 kat) eklendi, aynı biçimde karıştırıldı (%70 ab4). Ayrılan 48 gerçek olayda (eşik 0,9) yanlış alarm
     29/31'den 21/31'e indi, saldırı yakalama 14/17'de kaldı. Diğer setlerde mix-30 ile fark 1 puanın altında
     (Türkçe 88,3 / 8,4; DeepSeek testinde yanlış alarm %25,8). Ölçüm payı küçük. 171/171 test.
+30. Varsayılan model mixraw-ab4-evilsandangels-30, eşik 0,3 oldu (07.11.2026): v12lab'e ikiz veri seti evilsandangels
+    eklenerek eğitilen ham modelin %30'u, soup04-ab4'ün %70'i. 16 kümede yanlış alarm hepsinde düştü (gerçek olaylarda
+    %67,7 → %22,6 eşik 0,9'da, %45,2 eşik 0,3'te; DeepSeek testinde %25,8 → %3,0 / %6,1; gerçek MCP metinlerinde
+    %5,0 → %0,9 / %2,2). Eşik 0,3'te yakalama yalnız ind −3,7, obf −2,8, ml −2,0, rt −0,7 puan düştü, wtr, tr, boundary
+    ve test kümelerinde arttı ya da aynı kaldı. Eşik 0,9'da yakalama 7 kümede düşer, bu yüzden model yalnız 0,3 ile
+    varsayılan. Rug pull örneklerinin yakalaması hâlâ zayıf (%52–60); bu tehdide karşı asıl savunma araç sabitleme.
+    ONNX ile PyTorch arasında olasılık farkı 0,0000; int8 200 satırda 5 kararı değiştirdiği için silindi. 171/171
+    test, 10 demo beklenen sonuçları verdi (zararsız metinler geçti, saldırılar engellendi).
 
 **Sıradakiler:**
 

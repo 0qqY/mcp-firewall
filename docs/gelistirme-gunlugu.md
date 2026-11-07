@@ -504,3 +504,35 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     kümesi yalnızca 6 ayrı mesaj şablonundan geliyor; e-posta içeren 147 satırın hepsi tek şablon ve her model onu %99
     saldırı sayıyor (eğitimde 1771 benzer örnek olmasına rağmen), yani İngilizce %50'lik yanlış alarm zayıf bir ölçüm.
     Gerçek ilerleme için doğal, çeşitli metin (LLM ile yazılmış, ≈0,17 $/100 çift) ya da panel etiketleri gerekiyor.
+85. **evilsandangels ikiz veri seti, varsayılan değişmedi (07.11.2026):** Yol haritası 1/7. Kullanıcının hazırladığı
+    şablon tabanlı ikiz veri seti (4 kategori: dolaylı enjeksiyon, bellek zehirleme, istem enjeksiyonu, rug pull; her
+    zararlı örneğe temiz ikiz, `pair_id` bölmeleri, 7996 satır, İngilizce/Türkçe) `training/evilsandangels_data.py` ile
+    eğitim verisine çevrildi (rug pull satırları 512 token'a sığsın diye sıkıştırılmış JSON). Veri setinin kendi test
+    bölmesinde varsayılan model yakalama %80,9 / yanlış alarm %32,8 (rug pull yakalama %33, ikiz doğruluğu %48); ham
+    evilsandangels modeli %100 / %0 ama test bölmesindeki zararlı ifadelerin ≈%55'i eğitimde de geçtiği için bu puan
+    iyimser. Yalnız veri setiyle eğitim aşırı uyuyor (devreal yanlış alarm %5 → %39, rt yakalama %97 → %70). Kontrol
+    modeli (aynı tarif, veri seti yok) lab/llm yanlış alarmını zaten 0'a indiriyor; kazancın çoğu "ham ağırlık − çorba"
+    farkından geliyor, veri setinden değil. Veri setinin kendi etkisi (kontrole göre): tr yanlış alarm %1,5 → %8,2, rt
+    yakalama %95 → %85,7, wtr yakalama %50 → %63. En iyi uzlaşma B %50 (soup04-ab4 %50 + ham evilsandangels %50):
+    16 kümenin hepsinde yanlış alarm düşük ama 0,9 eşiğinde 7 kümede yakalama düştü (ind −18,7, obf −14,2, wtr −11,2,
+    ml −11,1, rt −5,5); dağıtılmadı. B %30: yakalama ind −8,5, wtr −7,6, obf −5,4, hftr −5,0, ml −4,6 düştü, yanlış
+    alarm her kümede düştü (lab %67,7 → %22,6, llm %25,8 → %3,0, devreal %5,0 → %0,9). Eşit yanlış alarmda fark
+    neredeyse tamamen eşik kayması (gerçek sıralama kaybı ind −1,5, obf −1,1, ml −0,7; geri kalan kümelerde varsayılana
+    eşit ya da önde). Genel eşik 0,3'te B %30 wtr/hfho/tr/boundary/test/llm/lab/devreal kümelerinde hem yakalamada hem
+    yanlış alarmda varsayılandan iyi; yakalamada yalnız ind −3,7, obf −2,8, ml −2,0, rt −0,7 kaybediyor (yanlış alarm
+    bunlarda da düşük); hftr'de yakalama +2,6, yanlış alarm +1,3. Veri setinin rug pull kazancı zayıf: yakalama 0,9 ve
+    0,5'te %52, 0,3'te %60. Sonuç: varsayılan model mix-ab4-lab-30 kaldı. Denenen tek gerçekçi aday B %30 + eşik
+    0,3–0,5; ama bu hem varsayılan modeli hem varsayılan ML eşiğini değiştirir, karar kullanıcıda. Raporlar
+    `training/runs/evilsandangels_*.md` (klasör git'e girmiyor).
+86. **Varsayılan model mixraw-ab4-evilsandangels-30, eşik 0,3 (07.11.2026):** 85. kaydın adayı, kullanıcının isteğiyle
+    depoda varsayılan olarak hazırlandı. `export_onnx.py` ile `models/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30` üretildi (fp32 ile
+    PyTorch arasında olasılık farkı 0,0000; int8 200 satırda 5 kararı değiştirdiği için silindi). Değişenler:
+    `policy.example.yaml` (model + `threshold: 0.3`), `test/ml-model.test.ts` (aday listesinde ilk sıra), 9 demo
+    (model yolu; eşik 0,9 → 0,3), `temizlik.ps1` (yeni model ve ham evilsandangels `best` klasörü korunanlara eklendi),
+    README ("Varsayılan model", tarif, "evilsandangels ikiz veri seti" tablosu, yol haritası) ve `docs/tehdit-kapsami.md`
+    (madde 30). Kodun varsayılan eşiği (`src/policy.ts`) 0,9 olarak kaldı: eşik modele bağlı ve baseline gibi başka
+    modeller 0,9'u bekliyor; politikada `ml.threshold` yazmayan kurulum yeni modelle 0,9'da çalışır ve 0,3'e göre
+    daha az yakalar. 171/171 test (gerçek model testi yeni modelle: zararsız 0,000 / 0,000, saldırı 1,000 / 1,000);
+    filesystem, web, sql, slack, toxic-agent-flow ve more-mcps (docs, gh, mail, shell, plug) demoları eşik 0,3 ile aynı
+    sonucu verdi: zararsız metinler geçti, saldırılar engellendi. Kurulum kopyası (`~/.mcp-firewall`) henüz
+    değiştirilmedi; commit yok.

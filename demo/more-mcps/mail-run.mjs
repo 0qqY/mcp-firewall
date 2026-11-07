@@ -16,7 +16,7 @@ const { policy, audit } = writePolicy(here, 'mail', [
   'pinning: { enabled: false }',
   'dlp: { enabled: true, action: redact }',
   'ml:', '  enabled: true', `  model: ${JSON.stringify(MODEL)}`,
-  '  threshold: 0.9', '  scan: { toolResults: block }',
+  '  threshold: 0.3', '  scan: { toolResults: block }',
 ]);
 
 const steps = [

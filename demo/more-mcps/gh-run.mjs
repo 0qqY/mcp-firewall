@@ -17,7 +17,7 @@ const { policy, audit } = writePolicy(here, 'gh', [
   'pinning: { enabled: false }',
   'dlp: { enabled: true, action: redact }',
   'ml:', '  enabled: true', `  model: ${JSON.stringify(MODEL)}`,
-  '  threshold: 0.9', '  scan: { toolResults: block, toolDefinitions: hide }',
+  '  threshold: 0.3', '  scan: { toolResults: block, toolDefinitions: hide }',
 ]);
 
 const steps = [
