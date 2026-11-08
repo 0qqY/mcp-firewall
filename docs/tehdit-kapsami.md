@@ -27,7 +27,7 @@ mixraw-ab4-evilsandangels-30 (eşik 0,3; tablodaki ölçümler önceki modellerl
 | El sıkışma yanıtındaki sunucu `instructions` alanı | Evet: zehirliyse alan çıkarılıyor. `initialize`'da 27.10.2026'dan, MCP 2026-07-28'in `server/discover` yanıtında 29.10.2026'dan itibaren; o tarihe kadar bu sürümde talimatlar taranmadan geçiyordu ve sunucu kodu kontrolü çalışmıyordu |
 | `prompts/list`, `resources/list`, `resources/templates/list` açıklamaları | Evet (27.10.2026'dan itibaren): zehirli kayıt gizleniyor |
 | Sunucudan istemciye giden `sampling/createMessage` ve `elicitation/create` içeriği | Evet (27.10.2026'dan itibaren): gizli karakter ve ML; işaretlenen istek sunucuya reddediliyor |
-| Sunucu sürecinin kendi ağ ve dosya erişimi | **Hayır**: firewall yalnızca stdio'yu görüyor |
+| Sunucu sürecinin kendi ağ ve dosya erişimi | **Hayır**: firewall yalnızca stdio'yu görüyor. 08.11.2026'dan itibaren `sandbox` açıksa görmüyoruz ama sınırlıyoruz: sunucu kilitli bir Docker konteynerinde çalışıyor (ağ yok, salt okunur kök, yalnızca bağlanan klasörler) |
 
 ## 1. Korunuyoruz
 
@@ -69,7 +69,7 @@ mixraw-ab4-evilsandangels-30 (eşik 0,3; tablodaki ölçümler önceki modellerl
 
 | Saldırı | Örnek | Neden |
 |---|---|---|
-| İlk sürümünden itibaren kötü niyetli sunucu kodu (tedarik zinciri) | Typosquat paketler; postmark-mcp 1.0.16 ile ilk kez kurulan bir sunucu | Sunucu veriyi kendi ağ bağlantısıyla, JSON-RPC dışından gönderiyor. Firewall yalnızca protokol trafiğini görüyor. Kod sabitleme yalnızca *değişikliği* yakalar; ilk kurulan sürüm referans kabul edilir. Sonradan güncellenen paket artık yakalanıyor (aşağıdaki nota bakın). |
+| İlk sürümünden itibaren kötü niyetli sunucu kodu (tedarik zinciri) | Typosquat paketler; postmark-mcp 1.0.16 ile ilk kez kurulan bir sunucu | Sunucu veriyi kendi ağ bağlantısıyla, JSON-RPC dışından gönderiyor. Firewall yalnızca protokol trafiğini görüyor. Kod sabitleme yalnızca *değişikliği* yakalar; ilk kurulan sürüm referans kabul edilir. Sonradan güncellenen paket artık yakalanıyor (aşağıdaki nota bakın). 08.11.2026'dan itibaren `sandbox` (Docker) sunucunun dosya ve ağ erişimini sınırlıyor: `network: none` iken sunucu veriyi dışarı gönderemez ve makinenin dosyalarını okuyamaz. Ağ açıldığında (`bridge`) sunucunun kendi bağlantısı yine görünmez. |
 | Sunucu tarafı açıklar | Anthropic Filesystem MCP "EscapeRoute" CVE-2025-53109/53110 (sembolik bağlantı ve önek atlatma); MCP sunucularında komut enjeksiyonu (OWASP MCP05) | Açık sunucu kodunun içinde çalışıyor. Argüman regex kuralları (`..`, `/etc`, `;`) bir kısmını kesebilir ama varsayılan olarak tanımlı değiller. |
 | İstemci ve aracı yazılım açıkları | mcp-remote CVE-2025-6514 (OAuth `authorization_endpoint` üzerinden komut çalıştırma); MCP Inspector CVE-2025-49596 ve CVE-2025-58444 | OAuth akışı JSON-RPC başlamadan önce, `mcp-remote` sürecinin içinde gerçekleşiyor. |
 | Yapılandırma dosyası saldırıları | Cursor MCPoison CVE-2025-54136; CurXecute CVE-2025-54135; IDE'lerin proje tanımlı MCP sunucularını otomatik çalıştırması (CSA, Temmuz 2026) | Firewall da aynı `mcp.json` içinde tanımlı; saldırgan bu dosyayı değiştirirse firewall'u devreden çıkarabilir veya firewall'suz yeni bir sunucu ekleyebilir. |
@@ -101,7 +101,10 @@ hash'leyip pin dosyasında saklıyor. 1.0.16 kurulduğunda `index.js` değişti�
 Testte bu senaryo birebir canlandırıldı (`test/codepin.test.ts`): aynı tool tanımları, `index.js`'e eklenmiş bir `Bcc` satırı.
 
 Sınırları: ilk kurulan sürüm referans kabul edildiği için ilk günden kötü olan paketleri (typosquat) yakalamaz.
-Onlar için sunucuyu ağ izin listesiyle (yalnızca `api.postmarkapp.com`) sandbox içinde çalıştırmak gerekir.
+Onlar için sunucuyu sandbox içinde çalıştırmak gerekir. 08.11.2026'dan itibaren `sandbox` var (README: "Sandbox (Docker)"),
+ama ağ ya kapalı ya açık: Docker adres bazlı izin listesi sunmuyor. Sunucunun ağa ihtiyacı yoksa `network: none` ile
+veri sızdırması engellenir; ihtiyacı varsa (ör. e-posta API'si) postmark-mcp türü bir saldırı, izin verilen API'ye
+kötü niyetli istek atmaya devam eder. Bunun için kendi Docker ağınızda çıkış proxy'si gerekir.
 27.10.2026'dan itibaren `uvx`, `uv tool run` ve `pipx run` ile çalışan Python paketleri de otomatik bulunuyor
 (paketin wheel `RECORD` dosyasındaki dosyalar hash'leniyor). Gerçek kurulumla doğrulandı (uv 0.13.5, Windows,
 `uvx mcp-server-time` 2026.10.19): ilk çalıştırmada uv önbelleğindeki 9 dosya bulunup sabitlendi; ikinci çalıştırma
@@ -125,7 +128,7 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
 | Kod çözücü | `src/decode.ts`, `decoding` | base64/hex/URL/kaçış dizisi/HTML varlığı/ROT13 ile gizlenmiş ya da birleştirilmek üzere parçalara bölünmüş talimatlar ve secret'lar (iç içe 2 seviye); Unicode TAG ve varyasyon seçicisi kaçakçılığıyla saklanan metin (ML ve desenler gizli metni okur); leetspeak, harf aralama, noktalarla bölme, benzer harfler (homoglif), rastgele büyük-küçük harf | Şifrelenmiş metin (ROT13 dışı), ters çevrilmiş metin, dolgu kelimelerle bölünmüş komutlar |
 | Fail-closed proxy | `src/proxy.ts`, `src/jsonrpc.ts` | Bozuk mesajlar, 32 MB üzeri mesajlar, iç hata durumunda trafiğin sızması | — |
 | Dashboard güvenliği | `src/dashboard/server.ts` | Kendi arayüzümüze DNS rebinding ve CSRF | — |
-| *(Önerilen)* Ağ sandbox'ı | — | Sunucunun JSON-RPC dışından veri sızdırması | Sunucunun izinli hedefe kötü niyetli istek atması |
+| Sandbox (Docker) *(08.11.2026'da eklendi)* | `src/sandbox.ts`, `sandbox` | Sunucu sürecinin makinede serbestçe dosya okuması, ağa çıkması ve program başlatması: ağ yok (`none`), salt okunur kök, tüm yetkiler kapalı, root olmayan kullanıcı, kaynak sınırı; kimlik bilgisi klasörleri ve firewall'un kendi dosyaları bağlanamıyor; image'ın içerik kimliğiyle kod sabitleme | Ağ açıkken (`bridge`) sunucunun izinli hedefe kötü niyetli isteği (adres bazlı izin listesi yok); bağlanan klasördeki veri; Docker ve çekirdek açıkları; uzak (gateway) sunucular |
 
 ## İyileştirmeler
 
@@ -234,11 +237,21 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
     varsayılan. Rug pull örneklerinin yakalaması hâlâ zayıf (%52–60); bu tehdide karşı asıl savunma araç sabitleme.
     ONNX ile PyTorch arasında olasılık farkı 0,0000; int8 200 satırda 5 kararı değiştirdiği için silindi. 171/171
     test, 10 demo beklenen sonuçları verdi (zararsız metinler geçti, saldırılar engellendi).
+31. Sunucu sandbox'ı (08.11.2026): `sandbox` açıkken sunucu makinede değil, kilitli bir Docker konteynerinde çalışıyor
+    (`src/sandbox.ts`): ağ yok (`none`), salt okunur kök, tüm Linux yetkileri kapalı, root olmayan kullanıcı, bellek/CPU/süreç
+    sınırı, ortam değişkenleri yalnızca adıyla geçiyor, klasör bağlama kimlik bilgisi klasörlerini, ev dizinini, politikanın ve
+    firewall'un kendi dosyalarını ve Docker soketini reddediyor (sembolik bağlar çözüldükten sonra yeniden denetleniyor).
+    Ham docker bayrağı kabul edilmiyor. Sunucu kodu sabitleme bu modda image'ın içerik kimliğini hash'liyor. Gerçek Docker
+    Desktop'ta (Windows) denendi: konteynerde kullanıcı `nobody`, `touch /x` "Read-only file system", ağ "bad address", yetkiler
+    `CapEff 0000000000000000`, salt okunur bağlamaya yazılamıyor, yazılabilir bağlamaya yazılıyor; GitHub MCP v2.0.3 (46 tool)
+    `network: none` ile firewall üzerinden `initialize` ve `tools/list`'e cevap verdi, çıkışta konteyner kalktı, firewall sert
+    öldürülünce de 1 saniyede kalktı. Kalan sınırlar: ağ açıkken sunucunun kendi bağlantısı görünmez ve adres bazlı izin listesi
+    yok; bağlanan klasördeki veri sunucuya açıktır; Docker'ın yalıtımı VM sınırı değildir. 200/200 test (29'u yeni).
 
 **Sıradakiler:**
 
 1. "Görev talimatı" metinlerinde kalan yanlış alarm (Türkçe benchmark %33, iç testte İngilizce %53) ve dış Türkçe setlerdeki düşük isabet (%48–65).
-2. Belgelere eklenecek tavsiyeler: sunucuları sandbox veya container içinde ve sınırlı ağ erişimiyle çalıştırmak; paket sürümünü sabitlemek.
+2. Sandbox'ta adres bazlı çıkış izin listesi (iç Docker ağı + proxy), image'ı sürümü sabit paketle kuran `sandbox build` yardımcısı ve Podman desteği; belgelere paket sürümünü sabitleme tavsiyesi.
 3. Güvenlik konulu zararsız metinlerde kalan yanlış alarm (ölçüm soup04-ab4 ile; mix-30'da depodaki metinlerde %6,6 → %4,7): soup04-ab4 depodaki Markdown paragraflarının %11'ini hâlâ saldırı sayıyor (çoğu saldırı örneği içeren belgeler). Sınır çiftleri setinde RAG bağlamı zehirleme isabeti %66'dan %58'e indi.
 
 ## Kaynaklar

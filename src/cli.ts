@@ -13,15 +13,27 @@ import { Gateway } from './gateway.js';
 import { approvePending, listPending, PinStore } from './pinning.js';
 import { loadPolicy, PolicyError, type Policy } from './policy.js';
 import { FirewallProxy } from './proxy.js';
+import {
+  buildSandboxCommand,
+  describeSandbox,
+  formatLaunch,
+  isImageRef,
+  killContainer,
+  preflight,
+  sandboxFingerprint,
+  SandboxError,
+  type SandboxLaunch,
+} from './sandbox.js';
 import { TaintTracker } from './taint.js';
 
-const USAGE = `Usage: mcp-firewall [--policy <file>] [--name <server-id>] [--code <path>]... -- <command> [args...]
+const USAGE = `Usage: mcp-firewall [--policy <file>] [--name <server-id>] [--code <path>]... [--sandbox <image>] -- <command> [args...]
        mcp-firewall gateway --upstream <url> [--policy <file>] [--name <server-id>] [--listen <host:port>]
                             [--path </mcp>] [--header "Name: value"]... [--allow-origin <origin>]... [--allow-host <name>]...
                             [--no-forward-auth]
        mcp-firewall dashboard [--policy <file>] [--audit <file>] [--port <port>]
        mcp-firewall pins list [--policy <file>]
        mcp-firewall pins approve --name <server-id> [--policy <file>] [<tool>...]
+       mcp-firewall sandbox show [--policy <file>] [--name <server-id>] [--sandbox <image>] -- <command> [args...]
 
 Options:
   --policy <file>   YAML policy file (default: $MCP_FIREWALL_POLICY, else built-in defaults)
@@ -29,8 +41,14 @@ Options:
                     (default: the server command line)
   --code <path>     Server code to fingerprint, in addition to what is found automatically
                     (npx packages, local scripts); repeatable
+  --sandbox <image> Run the server in a locked-down Docker container made from this image (same as
+                    sandbox.enabled and sandbox.image in the policy). The command after "--" runs
+                    inside the container, so it must exist in the image.
   --audit <file>    Audit log to show (default: the policy's audit.file)
   --port <port>     Dashboard port on 127.0.0.1 (default: 4747)
+
+sandbox show prints the docker command a sandboxed server would be started with and checks that Docker
+and the image are available; it starts nothing.
 
 gateway serves a Streamable HTTP MCP endpoint (default http://127.0.0.1:8787/mcp) in front of a remote
 server, with the same policy checks. --header values may name environment variables as \${VAR}, so
@@ -49,6 +67,8 @@ interface CliOptions {
   policyFile?: string;
   name?: string;
   code: string[];
+  /** From --sandbox: turns the sandbox on with this image, over whatever the policy says. */
+  sandboxImage?: string;
   command: string;
   args: string[];
 }
@@ -60,18 +80,46 @@ function parseArgs(argv: string[]): CliOptions {
   const [command, ...args] = argv.slice(sep + 1);
   let policyFile = process.env.MCP_FIREWALL_POLICY || undefined;
   let name: string | undefined;
+  let sandboxImage: string | undefined;
   const code: string[] = [];
   for (let i = 0; i < flags.length; i++) {
     const flag = flags[i];
     const value = flags[i + 1];
-    if (flag !== '--policy' && flag !== '--name' && flag !== '--code') throw new UsageError(`unknown option ${flag}`);
+    if (flag !== '--policy' && flag !== '--name' && flag !== '--code' && flag !== '--sandbox') throw new UsageError(`unknown option ${flag}`);
     if (value === undefined) throw new UsageError(`${flag} needs a value`);
     if (flag === '--policy') policyFile = value;
     else if (flag === '--code') code.push(value);
-    else name = value;
+    else if (flag === '--sandbox') {
+      if (!isImageRef(value)) throw new UsageError(`--sandbox: not a valid image reference: ${value}`);
+      sandboxImage = value;
+    } else name = value;
     i++;
   }
-  return { policyFile, name, code, command, args };
+  return { policyFile, name, code, sandboxImage, command, args };
+}
+
+/** The policy with --sandbox applied: that image, sandbox on, every other sandbox setting from the policy. */
+function withSandboxFlag(policy: Policy, options: CliOptions): Policy {
+  return options.sandboxImage ? { ...policy, sandbox: { ...policy.sandbox, enabled: true, image: options.sandboxImage } } : policy;
+}
+
+/** `sandbox show`: what a sandboxed server would be started with, and whether Docker and the image are ready. */
+function runSandbox(argv: string[]): void {
+  const [action, ...rest] = argv;
+  if (action !== 'show') throw new UsageError(`unknown sandbox action ${action ?? ''}`);
+  const options = parseArgs(rest);
+  const policy = withSandboxFlag(loadPolicy(options.policyFile), options);
+  if (!policy.sandbox.enabled) throw new UsageError('the sandbox is off: pass --sandbox <image>, or set sandbox.enabled and sandbox.image in the policy');
+  const serverId = options.name ?? [options.command, ...options.args].join(' ');
+  const launch = buildSandboxCommand(policy.sandbox, { command: options.command, args: options.args }, { serverId });
+  process.stdout.write(`${describeSandbox(policy.sandbox)}\n\n${formatLaunch(launch)}\n\n`);
+  try {
+    const id = preflight(policy.sandbox);
+    process.stdout.write(id ? `image is present: ${id}\n` : `image is not present locally; Docker will pull it at start (sandbox.pull: ${policy.sandbox.pull})\n`);
+  } catch (err) {
+    process.stdout.write(`${(err as Error).message}\n`);
+    process.exitCode = 1;
+  }
 }
 
 function runPins(argv: string[]): void {
@@ -274,19 +322,43 @@ async function main(): Promise<void> {
     }
     return;
   }
+  if (argv[0] === 'sandbox') {
+    try {
+      runSandbox(argv.slice(1));
+    } catch (err) {
+      process.stderr.write(`mcp-firewall: ${(err as Error).message}\n`);
+      if (err instanceof UsageError) process.stderr.write(USAGE);
+      process.exit(err instanceof UsageError || err instanceof PolicyError ? 2 : 1);
+    }
+    return;
+  }
 
   let options: CliOptions;
   let policy: Policy;
   try {
     options = parseArgs(argv);
-    policy = loadPolicy(options.policyFile);
+    policy = withSandboxFlag(loadPolicy(options.policyFile), options);
   } catch (err) {
     process.stderr.write(`mcp-firewall: ${(err as Error).message}\n`);
     if (err instanceof UsageError) process.stderr.write(USAGE);
     process.exit(err instanceof UsageError || err instanceof PolicyError ? 2 : 1);
   }
 
-  const serverId = options.name ?? [options.command, ...options.args].join(' ');
+  // Two sandboxed servers can run the same command in different images, so the image is part of the default id.
+  const serverId = options.name ?? [policy.sandbox.enabled ? `sandbox:${policy.sandbox.image}` : '', options.command, ...options.args].filter(Boolean).join(' ');
+
+  // With the sandbox on, the process the firewall starts is the container runtime and the server runs inside it.
+  let launch: SandboxLaunch | undefined;
+  if (policy.sandbox.enabled) {
+    try {
+      preflight(policy.sandbox);
+      launch = buildSandboxCommand(policy.sandbox, { command: options.command, args: options.args }, { serverId });
+    } catch (err) {
+      process.stderr.write(`mcp-firewall: ${(err as Error).message}\n`);
+      process.exit(err instanceof SandboxError ? 1 : 2);
+    }
+  }
+
   const audit = openAudit(policy, serverId);
   const pins = policy.pinning.enabled ? new PinStore(policy.pinning.file, serverId) : undefined;
 
@@ -294,12 +366,17 @@ async function main(): Promise<void> {
   const loadClassifier = classifierLoader(policy, audit, () => child.kill());
 
   // stdout belongs to the JSON-RPC stream; server stderr passes straight through for host logs.
-  const child = spawn(options.command, options.args, { stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawn(launch?.command ?? options.command, launch?.args ?? options.args, { stdio: ['pipe', 'pipe', 'inherit'] });
+  /** A killed docker client (always the case on Windows) leaves its container running, so stop it by name. */
+  const stopContainer = () => {
+    if (launch) killContainer(launch.container);
+  };
   child.on('error', (err) => {
     process.stderr.write(`mcp-firewall: failed to start server: ${err.message}\n`);
     process.exit(1);
   });
   child.on('exit', (code, signal) => {
+    stopContainer();
     // Records still on their way to the SIEM get a moment to leave.
     void audit.flush().finally(() => process.stdout.write('', () => process.exit(code ?? (signal ? 1 : 0))));
   });
@@ -307,15 +384,25 @@ async function main(): Promise<void> {
     // The server went away; its exit handler ends the firewall.
   });
   process.stdin.on('end', () => child.stdin!.end());
-  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => child.kill(sig));
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(sig, () => {
+      child.kill(sig);
+      stopContainer();
+    });
+  }
 
   audit.record({ verdict: 'info', reason: `firewall started in ${policy.mode} mode` });
+  if (launch) audit.record({ verdict: 'info', reason: `sandbox on: container ${launch.container}; ${describeSandbox(policy.sandbox)}` });
+  const serverCode = () =>
+    policy.sandbox.enabled
+      ? sandboxFingerprint(policy.sandbox, options.code.length > 0 ? fingerprintServer('', [], options.code) : undefined)
+      : fingerprintServer(options.command, options.args, options.code);
   const proxy = new FirewallProxy(policy, audit, pins, {
     clientIn: process.stdin,
     clientOut: process.stdout,
     serverIn: child.stdin!,
     serverOut: child.stdout!,
-  }, loadClassifier, () => fingerprintServer(options.command, options.args, options.code));
+  }, loadClassifier, serverCode);
   // Each server has its own firewall process; a shared tracker lets data read through one stop at another's sink.
   if (proxy.taint && policy.taint.scope === 'shared') proxy.taint = new TaintTracker(policy.taint, serverId, TaintTracker.sessionKey());
   proxy.start();

@@ -5,6 +5,21 @@ import { parse } from 'yaml';
 import { buildDetectors, type Detector } from './dlp.js';
 import { globToRegExp } from './glob.js';
 import { compilePathPattern, type PathConstraint } from './paths.js';
+import {
+  defaultProtectedPaths,
+  hasMountBreaker,
+  isContainerPath,
+  isEnvName,
+  isImageRef,
+  isNetworkName,
+  isSize,
+  isUser,
+  mountProblem,
+  RESERVED_ENV,
+  SANDBOX_DEFAULTS,
+  type SandboxConfig,
+  type SandboxMount,
+} from './sandbox.js';
 import { SYSLOG_FACILITIES, type SiemConfig } from './siem.js';
 import type { TaintConfig, TaintSink, TaintSource } from './taint.js';
 
@@ -78,6 +93,8 @@ export interface Policy {
   };
   /** Session data-flow tracking: what source tools returned must not leave through sink tools. */
   taint: TaintConfig;
+  /** Runs the server in a locked-down Docker container instead of on the host (off by default). */
+  sandbox: SandboxConfig;
   dlp: {
     enabled: boolean;
     scanRequests: boolean;
@@ -330,6 +347,92 @@ function compileTaint(raw: Obj, baseDir: string): TaintConfig {
   };
 }
 
+const SANDBOX_KEYS = ['enabled', 'image', 'pull', 'network', 'readOnly', 'tmpfsSize', 'user', 'memory', 'cpus', 'pidsLimit', 'mounts', 'env', 'workdir'];
+
+/**
+ * `stateFiles` are the firewall's own files (audit log, pins, taint data, model): a mount that reaches them
+ * would let the server rewrite the evidence or the defences.
+ */
+function compileSandbox(raw: unknown, baseDir: string, stateFiles: string[]): SandboxConfig {
+  const s = obj(raw, 'sandbox');
+  for (const key of Object.keys(s)) {
+    if (!SANDBOX_KEYS.includes(key)) {
+      const hint = /arg|flag|option|privileg|cap|security|device|volume|pid|ipc|host/i.test(key)
+        ? ' (raw docker flags are not supported, so the sandbox cannot be loosened by accident; run docker yourself and wrap that command if you need more)'
+        : '';
+      throw new PolicyError(`sandbox.${key}: unknown option${hint}`);
+    }
+  }
+  const text = (v: unknown, path: string): string | undefined => {
+    if (v === undefined) return undefined;
+    if (typeof v !== 'string') throw new PolicyError(`${path}: expected a string`);
+    return v;
+  };
+  const size = (v: unknown, def: string, path: string): string => {
+    const value = text(v, path) ?? def;
+    if (!isSize(value)) throw new PolicyError(`${path}: expected a size such as 512m or 1g`);
+    return value;
+  };
+
+  const enabled = bool(s.enabled, false, 'sandbox.enabled');
+  const image = text(s.image, 'sandbox.image') ?? '';
+  if (image && !isImageRef(image)) throw new PolicyError(`sandbox.image: not a valid image reference: ${image}`);
+  if (enabled && !image) throw new PolicyError('sandbox.image: required when the sandbox is enabled');
+  const network = text(s.network, 'sandbox.network') ?? SANDBOX_DEFAULTS.network;
+  if (!isNetworkName(network)) throw new PolicyError(`sandbox.network: expected none, bridge or the name of a user-defined network (host is not allowed): ${network}`);
+  const user = text(s.user, 'sandbox.user') ?? SANDBOX_DEFAULTS.user;
+  if (!isUser(user)) throw new PolicyError('sandbox.user: expected a numeric uid or uid:gid');
+  const pidsLimit = num(s.pidsLimit, SANDBOX_DEFAULTS.pidsLimit, 1, 100_000, 'sandbox.pidsLimit');
+  if (!Number.isInteger(pidsLimit)) throw new PolicyError('sandbox.pidsLimit: expected a whole number');
+  const workdir = text(s.workdir, 'sandbox.workdir');
+  if (workdir !== undefined && !isContainerPath(workdir)) throw new PolicyError('sandbox.workdir: expected an absolute path inside the container');
+
+  const env = strList(s.env, 'sandbox.env') ?? [];
+  for (const name of env) {
+    if (!isEnvName(name)) throw new PolicyError(`sandbox.env: ${name} is not a variable name`);
+    if (RESERVED_ENV.has(name)) throw new PolicyError(`sandbox.env: ${name} is set by the sandbox`);
+  }
+  if (new Set(env).size !== env.length) throw new PolicyError('sandbox.env: a variable is listed twice');
+
+  const home = homedir();
+  const guard = { protectedPaths: [...defaultProtectedPaths(home), ...stateFiles], protectedRoots: [home, baseDir] };
+  const rawMounts = s.mounts ?? [];
+  if (!Array.isArray(rawMounts)) throw new PolicyError('sandbox.mounts: expected a list');
+  const targets = new Set<string>();
+  const mounts: SandboxMount[] = rawMounts.map((m, i) => {
+    const path = `sandbox.mounts[${i}]`;
+    const o = obj(m, path);
+    for (const key of Object.keys(o)) if (!['source', 'target', 'mode'].includes(key)) throw new PolicyError(`${path}.${key}: unknown option`);
+    if (typeof o.source !== 'string' || !o.source) throw new PolicyError(`${path}.source: expected a host folder or file`);
+    if (typeof o.target !== 'string' || !isContainerPath(o.target)) throw new PolicyError(`${path}.target: expected an absolute path inside the container (no commas or quotes)`);
+    if (o.target === '/' || /^\/(proc|sys|dev)(\/|$)/.test(o.target)) throw new PolicyError(`${path}.target: ${o.target} is not allowed`);
+    if (targets.has(o.target)) throw new PolicyError(`${path}.target: ${o.target} is used by another mount`);
+    targets.add(o.target);
+    const source = isAbsolute(o.source) ? o.source : resolve(baseDir, o.source);
+    if (hasMountBreaker(source)) throw new PolicyError(`${path}.source: a comma, quote or control character in the path breaks the mount option`);
+    const problem = mountProblem(source, guard);
+    if (problem) throw new PolicyError(`${path}.source: ${source} cannot be mounted: ${problem}`);
+    return { source, target: o.target, readOnly: oneOf(o.mode, ['ro', 'rw'] as const, 'ro', `${path}.mode`) === 'ro' };
+  });
+
+  return {
+    enabled,
+    image,
+    pull: oneOf(s.pull, ['never', 'missing', 'always'] as const, SANDBOX_DEFAULTS.pull, 'sandbox.pull'),
+    network,
+    readOnly: bool(s.readOnly, SANDBOX_DEFAULTS.readOnly, 'sandbox.readOnly'),
+    tmpfsSize: size(s.tmpfsSize, SANDBOX_DEFAULTS.tmpfsSize, 'sandbox.tmpfsSize'),
+    user,
+    memory: size(s.memory, SANDBOX_DEFAULTS.memory, 'sandbox.memory'),
+    cpus: num(s.cpus, SANDBOX_DEFAULTS.cpus, 0.1, 64, 'sandbox.cpus'),
+    pidsLimit,
+    mounts,
+    env,
+    workdir,
+    ...guard,
+  };
+}
+
 /** Validates a parsed policy document; relative file paths resolve against `baseDir`. */
 export function compilePolicy(raw: unknown, baseDir: string): Policy {
   const root = obj(raw, 'policy');
@@ -372,6 +475,14 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
     if (err instanceof PolicyError) throw err;
     throw new PolicyError(`dlp: ${(err as Error).message}`);
   }
+
+  // The firewall's own files: a sandbox mount must not reach them.
+  const stateFiles = [
+    filePath(audit.file, 'mcp-firewall-audit.jsonl', baseDir, 'audit.file'),
+    filePath(pinning.file, 'mcp-firewall-pins.json', baseDir, 'pinning.file'),
+    filePath(taint.dir, 'mcp-firewall-taint', baseDir, 'taint.dir'),
+    filePath(ml.model, join('models', 'prompt-injection'), baseDir, 'ml.model'),
+  ];
 
   const useDefaults = bool(desc.useDefaults, true, 'descriptionScan.useDefaults');
   return {
@@ -424,6 +535,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
       remember: bool(approval.remember, true, 'approval.remember'),
     },
     taint: compileTaint(taint, baseDir),
+    sandbox: compileSandbox(root.sandbox, baseDir, stateFiles),
     dlp: {
       enabled: bool(dlp.enabled, true, 'dlp.enabled'),
       scanRequests: bool(dlp.scanRequests, true, 'dlp.scanRequests'),

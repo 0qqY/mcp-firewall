@@ -27,7 +27,8 @@ Host ──HTTP───► mcp-firewall gateway ──HTTPS──► Uzak MCP s
 | Zehirli prompt şablonu | `prompts/get` sonucu tanım desenleri ve gizli karakter kontrolünden geçer, eşleşen reddedilir; ML bulgusu varsayılan olarak yalnızca uyarıdır (`ml.scan.promptResults`) |
 | Rug pull | `pinning`: tool tanımlarının SHA-256 hash'i (TOFU), değişen tanım gizlenir; çıktı şeması ayrı hash'lendiği için pin her MCP sürümünde tutar |
 | Prompt şablonu rug pull'u | `pinning.prompts`: şablon, argüman değerleri çıkarılarak hash'lenir; onaydan sonra değişen şablon reddedilir |
-| Paket rug pull'u (postmark-mcp) | `pinning.serverCode`: npx paketinin / yerel script'in dosyaları hash'lenir; kod değişince sunucu el sıkışmada (`initialize` / `server/discover`) kesilir |
+| Paket rug pull'u (postmark-mcp) | `pinning.serverCode`: npx paketinin / yerel script'in dosyaları hash'lenir; kod değişince sunucu el sıkışmada (`initialize` / `server/discover`) kesilir. `sandbox` açıkken hash'lenen şey image'ın içerik kimliğidir |
+| Sunucu sürecinin kendi dosya ve ağ erişimi | `sandbox`: sunucu kilitli bir Docker konteynerinde çalışır (ağ yok, salt okunur kök, yetkisiz, root değil, kaynak sınırı, dar klasör bağlama). Docker'ın yalıtımıdır; ağ açıkken sunucunun kendi bağlantısı yine görünmez |
 | İlk günden zehirli / sonradan eklenen tool | `pinning.onNew: hide`: yeni tool onaylanana kadar gizli |
 | Sunucular arası tool gölgeleme | `pinning.onNameCollision`: başka sunucunun da sunduğu tool adı uyarılır veya gizlenir |
 | Hata mesajıyla zehirleme (ATPA) | JSON-RPC `error` yanıtları da DLP, gizli karakter ve ML taramasından geçer |
@@ -57,7 +58,7 @@ npm test
 ## Kullanım
 
 ```
-mcp-firewall [--policy <file>] [--name <server-id>] -- <command> [args...]
+mcp-firewall [--policy <file>] [--name <server-id>] [--sandbox <image>] -- <command> [args...]
 ```
 
 Claude Desktop örneği (`claude_desktop_config.json`):
@@ -259,6 +260,69 @@ sayılır. Şablon değişirse istemciye hata döner (`block`, varsayılan) ya d
 değişen içerik üreten dinamik prompt'lar (tarih, dosya içeriği gömenler) her seferinde değişmiş görünür; bu tür
 sunucularda `warn` veya `off` kullanılmalı.
 
+### Sandbox (Docker)
+
+Firewall yalnızca stdio'daki JSON-RPC'yi görür. Sunucu sürecinin kendi yaptıkları (dosya okuma, ağ bağlantısı, başka program
+başlatma) görünmez: `~/.ssh` okuyan ya da veriyi kendi HTTPS bağlantısıyla gönderen bir sunucuyu protokol katmanında
+yakalayamazsınız. `sandbox` açıkken sunucu makinede değil, kilitli bir Docker konteynerinde çalışır (08.11.2026):
+
+| Ayar | Varsayılan | Etkisi |
+|---|---|---|
+| `network` | `none` | Konteynerde ağ yok. `bridge`: tam internet; Docker Desktop'ta `host.docker.internal` ile makinenin yalnızca `127.0.0.1`'e bağlı servislerine de ulaşılır (denendi). Kendi Docker ağınızın adı da verilebilir; `host` kabul edilmez |
+| `readOnly` | `true` | Kök dosya sistemi salt okunur; `/tmp` bellekte yazılabilir (`tmpfsSize: 64m`) |
+| `user` | `65534:65534` | Root olmayan kullanıcı; tüm Linux yetkileri kapalı (`--cap-drop ALL`), `no-new-privileges` |
+| `memory`, `cpus`, `pidsLimit` | `512m`, `1`, `256` | Kaynak sınırı; bellek aşımında swap yok |
+| `env` | boş | Makinenizden konteynere geçen değişken **adları**; değer komut satırına yazılmaz (`-e ADI`) |
+| `mounts` | boş | Bağlanan klasörler, varsayılan salt okunur (`mode: rw` ile yazılabilir). Ev dizini, `~/.ssh`, `~/.aws` gibi kimlik bilgisi klasörleri, politikanın kendi klasörü, denetim/pin/taint dosyaları, ML modeli ve Docker soketi bağlanamaz; sembolik bağlar çözüldükten sonra yeniden denetlenir |
+| `pull` | `never` | Yalnızca yerel image kullanılır, firewall kendiliğinden indirme yapmaz; `missing` veya `always` ile değişir |
+
+```yaml
+# dosya.yaml (sunucu başına ayrı politika dosyası: image, ağ ve klasörler her sunucuda farklıdır)
+sandbox:
+  enabled: true
+  image: mcp-dosya-sunucusu:2.2.0        # "--" sonrasındaki komut bu image'ın İÇİNDE çalışır
+  mounts:
+    - { source: C:/projeler/site, target: /workspace, mode: ro }
+```
+
+```json
+{ "mcpServers": { "dosya": { "command": "mcp-firewall",
+    "args": ["--policy", "C:/Users/ben/.mcp-firewall/dosya.yaml", "--name", "dosya", "--", "mcp-server-filesystem", "/workspace"] } } }
+```
+
+```bash
+mcp-firewall --policy dosya.yaml --sandbox mcp-dosya-sunucusu:2.2.0 -- mcp-server-filesystem /workspace   # politikada sandbox yazmadan açmak
+mcp-firewall sandbox show --policy dosya.yaml -- mcp-server-filesystem /workspace   # hiçbir şey başlatmadan docker komutunu gösterir, Docker ve image'ı kontrol eder
+```
+
+- `--` sonrasındaki komut konteynerin içinde çalışır (`--entrypoint`); image'ın kendi entrypoint'i yok sayılır, komut image'da bulunmalıdır.
+- `network: none` iken sunucu çalışırken paket indiremez: `npx -y paket` çalışmaz. Paketi sürümüyle image'a kurun:
+
+  ```dockerfile
+  FROM node:22-alpine
+  ARG VERSION
+  RUN npm install -g --ignore-scripts @modelcontextprotocol/server-filesystem@${VERSION}
+  ```
+
+  `docker build --build-arg VERSION=2.2.0 -t mcp-dosya-sunucusu:2.2.0 .` (Dockerfile örneği derlenmedi; paketin çalıştırılabilir adı `mcp-server-filesystem`).
+- **Sunucu kodu sabitleme** bu modda image'ın içerik kimliğini (`sha256:...`) hash'ler: aynı etiketle yeniden derlenen ya da değiştirilen
+  image, değişmiş sunucu kodu gibi `initialize` anında kesilir (`pins approve` ile onaylanır). `image@sha256:...` verirseniz etiket uyarısı da çıkmaz.
+- Ham `docker` bayrağı eklenemez (`extraArgs` yok, bilinmeyen anahtar hata verir): politikadaki bir yazım hatası `--privileged`
+  ya da `--network host` açamaz. Daha fazlası gerekiyorsa `docker run ...` komutunu kendiniz yazıp firewall'a sunucu komutu
+  olarak verin; o durumda sandbox ayarları geçerli olmaz.
+- Firewall kapanırken konteyner adıyla durdurulur (`docker kill`); firewall sert öldürülürse konteyner stdin'in kapanmasıyla
+  kendiliğinden biter (Windows'ta GitHub MCP image'ıyla denendi: 1 saniye içinde).
+- Docker çalışmıyorsa ya da image yerelde yoksa (`pull: never`) firewall başlamaz ve ne yapılacağını söyler; sunucu sandbox'sız ayağa kalkmaz.
+
+**Sınırları:** Bu Docker'ın kendi yalıtımıdır (Windows ve macOS'ta Docker Desktop'ın VM'i içinde), donanım sanallaştırması değildir;
+çekirdek ya da Docker açığı konteynerden kaçırabilir. `network: bridge` verdiğinizde sunucunun kendi ağ bağlantısı yine görünmezdir:
+postmark-mcp türü bir sunucu, izin verdiğiniz API'ye kötü niyetli istek atmaya devam eder (Docker adres bazlı izin listesi sunmaz; bunun
+için kendi Docker ağınızda bir çıkış proxy'si gerekir). `bridge` ağındaki konteyner, Docker Desktop'ta makinenin yalnızca `127.0.0.1`'e bağlı
+servislerine de `host.docker.internal` üzerinden ulaşır (Windows'ta bir yerel HTTP servisiyle denendi; `none` iken ulaşamadı): firewall'un
+paneli, yerel veritabanları ve SIEM uç noktası dahil, makinenizdeki yerel servisler o sunucuya açık olur. Ağı gerçekten gereken sunuculara verin.
+Bağladığınız klasördeki veri sunucuya açıktır: dar tutun, mümkünse salt okunur bırakın.
+Uzak sunucular (`gateway`) için geçerli değildir. Yalnızca Windows'ta Docker Desktop ile denendi; Podman ve Windows Sandbox desteklenmez.
+
 ## Mimari
 
 | Dosya | Görev |
@@ -273,6 +337,7 @@ sunucularda `warn` veya `off` kullanılmalı.
 | `src/dlp.ts` | Secret/PII dedektörleri (Luhn ve TCKN checksum doğrulamalı) |
 | `src/pinning.ts` | Tool tanımı, sunucu kodu ve prompt şablonu pinleri, onay bekleyenler, sunucular arası ad çakışması |
 | `src/codepin.ts` | Sunucu kodunu bulma (npx önbelleği, uv/pipx ortamları, yerel script) ve hash'leme |
+| `src/sandbox.ts` | Sunucuyu kilitli Docker konteynerinde başlatma: `docker run` komutu üretimi, bağlama denetimi, image kimliği (kod pini), konteyneri durdurma |
 | `src/decode.ts` | Metin içindeki kodlanmış parçaları çözme ve karakter düzeyinde gizlemeyi geri alma |
 | `src/audit.ts` | JSONL audit log |
 | `src/siem.ts` | Audit kayıtlarını syslog (UDP/TCP/TLS) ve OTLP/HTTP ile SIEM'e gönderme |
@@ -967,6 +1032,8 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
   yeniden yazılmış, çevrilmiş, dolgu kelimelerle bölünmüş ya da şifrelenmiş veriyi yakalamaz (bunun için
   `when: session`).
 - JSON-RPC batch'leri tek tek mesajlar olarak iletilir.
+- `sandbox` Docker'ın yalıtımıdır, VM sınırı değildir. Ağ açıkken (`bridge`) sunucunun kendi bağlantısı görünmez ve adres bazlı
+  izin listesi yoktur; bağlanan klasördeki veri sunucuya açıktır. Yalnızca Windows'ta Docker Desktop ile denendi.
 - ML sınıflandırıcısı da bir modeldir: adversarial girdilerle atlatılabilir, bu yüzden tek savunma hattı değildir.
 
 ## Yol haritası
@@ -986,6 +1053,8 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
    İngilizce görev talimatları soup04-ab4'te %53), dış Türkçe setlerdeki
    düşük isabet (%48–65) ve rol istemlerindeki yanlış alarm (`prompts/get`'te model artık yalnızca uyarıyor; değişen
    şablonu sabitleme engelliyor). ROT13 ve kelimeleri parçalara bölen saldırılar 01.11.2026'da kapatıldı
+8. Sunucu sandbox'ı (Docker) — yapıldı (08.11.2026, yukarıda "Sandbox (Docker)"). Kalanlar: adres bazlı çıkış izin listesi
+   (iç Docker ağı + proxy), sürümü sabit paketle image kuran bir `sandbox build` yardımcısı, Podman
 
 ## Lisans
 

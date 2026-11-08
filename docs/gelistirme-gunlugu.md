@@ -597,3 +597,32 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     yazılmış metin gitti. Yan bulgu: `tools.rules` ve `taint` kalıpları (glob) büyük-küçük harfe duyarlı ve ham tool
     adına bakıyor (`sendMessage`, `send_*` ile; `deleteFile`, `delete_*` ile eşleşmez); düzeltilmedi. Gerçek bir e-posta
     sunucusuyla ve gerçek Claude Code ile denenmedi. 171/171 test (src değişmedi). Commit yok.
+90. **Sunucu sandbox'ı, Docker başlatıcı (08.11.2026):** Önerilen sıranın üçüncü adımı; en büyük yapısal boşluk: sunucu
+    süreci makinede tam yetkiyle çalışıyor, firewall yalnızca stdio'yu görüyor. `src/sandbox.ts` eklendi; politikaya `sandbox:`
+    bloğu (`enabled`, `image`, `pull`, `network`, `readOnly`, `tmpfsSize`, `user`, `memory`, `cpus`, `pidsLimit`, `mounts`,
+    `env`, `workdir`), CLI'ye `--sandbox <image>` ve `mcp-firewall sandbox show` geldi. Açıkken firewall sunucunun yerine
+    `docker run --rm -i --init --pull never --network none --cap-drop ALL --security-opt no-new-privileges:true --read-only
+    --user 65534:65534 --memory/--memory-swap/--cpus/--pids-limit ... --entrypoint <komut> <image> <argümanlar>` başlatıyor;
+    `--` sonrasındaki komut konteynerin içinde çalışıyor. Kararlar: ham docker bayrağı yok (bilinmeyen anahtar hata, `extraArgs`
+    için nedeni söyleniyor), `network: host` ve `container:` yok, ortam değişkenleri `-e ADI` ile adıyla geçiyor (değer komut
+    satırına girmiyor, eksik değişken hata), klasör `--mount type=bind` ile ve varsayılan salt okunur bağlanıyor; sürücü kökü,
+    ev dizini ve onu içeren üst klasörler, `~/.ssh` `~/.aws` `~/.gnupg` `~/.docker` `~/.kube` `~/.azure` `~/.config/gcloud`
+    `~/.mcp-firewall` `~/.claude` `.npmrc` `.pypirc` `.netrc` `.git-credentials`, politikanın kendi klasörü, denetim günlüğü, pin
+    dosyası, taint dizini, ML modeli ve Docker soketi/pipe reddediliyor; başlarken sembolik bağlar çözülüp yeniden denetleniyor.
+    Sunucu kodu sabitleme bu modda image'ın içerik kimliğini (`docker image inspect`) hash'liyor: etiketle verilirse uyarı,
+    kimlik değişirse `initialize` anında "server code changed" ile kesiliyor. Docker kapalıysa ya da image yerelde yoksa
+    (`pull: never`) firewall başlamıyor ve ne yapılacağını söylüyor. Çıkışta ve sinyalde konteyner adıyla `docker kill`
+    çağrılıyor (Windows'ta docker istemcisini öldürmek konteyneri durdurmaz). Testler: 29 yeni, 200/200 geçti.
+    `test/sandbox.test.ts` birim testleri (politika doğrulaması, bağlama koruması iki platform yoluyla, komut satırı sırası,
+    ad üretimi, image kimliği); `test/sandbox-cli.test.ts` PATH'teki sahte `docker` ile gerçek CLI'yi sürüyor (komut satırı,
+    stdio hand-over, konteyner durdurma, image pini, yeniden derlenen image'ın reddi, Docker kapalı/image yok iletileri,
+    `sandbox show`). Gerçek Docker Desktop'ta (Windows) denendi: alpine konteynerinde kullanıcı `nobody`, `touch /x`
+    "Read-only file system", `/tmp` yazılabilir, `network: none` iken `wget` "bad address" (`bridge`'de çalışıyor), `CapEff`
+    sıfır, salt okunur bağlamaya yazılamadı, yazılabilir bağlamadaki dosya ana makinede göründü, `/root` açılamadı; GitHub MCP
+    v2.0.3 (46 tool, sahte token) firewall CLI'si üzerinden `network: none` ile `initialize` ve `tools/list`'e cevap verdi
+    (`docker inspect`: `net=none ro=true user=65534:65534 caps_drop=[ALL] mem=512 MB pids=256`), çıkışta konteyner kalktı,
+    firewall `SIGKILL` ile öldürülünce de 1 saniyede kalktı. Bulgu: `bridge` ağındaki konteyner, yalnızca `127.0.0.1`'e bağlı
+    bir yerel HTTP servisine `host.docker.internal` ile ulaştı (`none` iken ulaşamadı); yani ağ verilen sunucu firewall'un
+    paneli dahil yerel servisleri görür, README'ye yazıldı. Yan etki: Docker Desktop bu oturumda açıldı. Eksik: adres bazlı
+    çıkış izin listesi (Docker sunmuyor; iç ağ + proxy gerekir), sürümü sabit paketle image kuran `sandbox build` yardımcısı,
+    Podman, macOS/Linux; README'deki Dockerfile örneği derlenmedi. Commit yok.

@@ -133,6 +133,29 @@ taint:
     #   when: session         # etiket alındıktan sonra bu tool'a her çağrıyı engelle
     #   labels: [private]     # yalnızca bu etiketler (boşsa hepsi)
 
+# Sandbox: sunucuyu doğrudan makinede değil, kilitli bir Docker konteynerinde çalıştırır (README: "Sandbox (Docker)").
+# Varsayılan kapalı. Açıkken "--" sonrasındaki komut konteynerin İÇİNDE çalışır, yani image'da bulunmalıdır.
+# Ağ yok, kök dosya sistemi salt okunur, Linux yetkileri kapalı, root olmayan kullanıcı, bellek/CPU/süreç sınırı var.
+# Ham docker bayrağı eklenemez; daha fazlası gerekiyorsa docker komutunu kendiniz yazıp onu sarmalayın.
+# Her sunucunun image'ı, ağı ve klasörleri farklıdır: sunucu başına ayrı politika dosyası (--policy) kullanın.
+# sandbox:
+#   enabled: true
+#   image: ghcr.io/ben/mcp-dosya-sunucusu:1.0.0   # etiket ya da image@sha256:... (sha256 daha sağlam)
+#   pull: never                 # never: yalnızca yerel image | missing | always
+#   network: none               # none | bridge (tam internet; Docker Desktop'ta host.docker.internal ile makinenin yerel
+#                               # servislerine de erişir) | kendi oluşturduğunuz Docker ağının adı. host kabul edilmez
+#   readOnly: true              # kök dosya sistemi salt okunur; /tmp bellekte yazılabilir (tmpfsSize: 64m)
+#   user: "65534:65534"         # yalnızca sayısal uid[:gid]
+#   memory: 512m
+#   cpus: 1
+#   pidsLimit: 256
+#   env: [GITHUB_TOKEN]         # konteynere geçecek değişken adları; değerler komut satırına yazılmaz
+#   mounts:                     # yalnızca gerekenleri, mümkünse salt okunur. Kimlik bilgisi klasörleri, ev dizini,
+#     - source: C:/projeler/site  # politikanın kendi klasörü ve firewall'un denetim/pin dosyaları bağlanamaz
+#       target: /workspace
+#       mode: ro                # ro (varsayılan) | rw
+#   workdir: /workspace
+
 # Katman 2: ML prompt-injection sınıflandırıcısı (yerel ONNX, internete çıkmaz)
 ml:
   enabled: false
