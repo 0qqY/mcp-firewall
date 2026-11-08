@@ -11,6 +11,10 @@ export const POLIGON = dirname(fileURLToPath(import.meta.url));
 export const REPO = resolve(POLIGON, '..');
 export const CLI = join(REPO, 'dist', 'src', 'cli.js');
 export const MODEL = process.env.MCP_FIREWALL_MODEL ?? join(REPO, 'models', 'mcp-pi-mmbert-mixraw-ab4-evilsandangels-30');
+// ML eşiği: varsayılan model için 0,3. Önceki varsayılan (mix-ab4-lab-30) 0,9 ister; ikisini karşılaştırmak için:
+// MCP_FIREWALL_MODEL=<mutlak yol>/mcp-pi-mmbert-mix-ab4-lab-30 POLIGON_ESIK=0.9 node poligon/dene.mjs eposta
+export const ESIK = Number(process.env.POLIGON_ESIK ?? 0.3);
+if (!(ESIK >= 0 && ESIK <= 1)) throw new Error(`POLIGON_ESIK 0 ile 1 arasında bir sayı olmalı (verilen: ${process.env.POLIGON_ESIK})`);
 // Koşu dizinleri (denetim kayıtları, giden kutusu ...). İki poligon aynı anda çalışacaksa ikisine ayrı kök verin:
 // POLIGON_CALISMA_KOK=poligon/.calisma/ikinci (aynı dizine yazan iki koşu birbirinin klasörünü siler).
 export const CALISMA = process.env.POLIGON_CALISMA_KOK ? resolve(process.env.POLIGON_CALISMA_KOK) : join(POLIGON, '.calisma');
@@ -49,7 +53,7 @@ export function politikaMetni(k, { denetim, pin }) {
     'ml:',
     `  enabled: ${!!k.ml}`,
     `  model: ${j(MODEL)}`,
-    '  threshold: 0.3',
+    `  threshold: ${ESIK}`,
     '  scan: { toolResults: block, toolDefinitions: hide }',
     '',
   ].join('\n');

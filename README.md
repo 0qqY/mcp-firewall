@@ -80,7 +80,9 @@ Claude Desktop örneği (`claude_desktop_config.json`):
 ```
 
 Firewall'un kendi mesajları stderr'e yazılır (Claude Desktop bunları MCP loglarında gösterir), audit kayıtları
-JSONL olarak `audit.file` dosyasına gider. Politika referansı için [policy.example.yaml](policy.example.yaml).
+JSONL olarak `audit.file` dosyasına gider. Politika referansı için [policy.example.yaml](policy.example.yaml); e-posta ve takvim sunucuları için ayrı bir örnek var:
+[policy-eposta.example.yaml](policy-eposta.example.yaml) (önceki model ve eşik 0,9; okunan e-posta metninin giden
+e-postada çıkması kullanıcıya sorulur).
 
 **İpucu:** Yeni bir server'ı önce `mode: monitor` ile çalıştır, audit logunda `would_block` kayıtlarını
 inceleyip kuralları ayarla, sonra `enforce`'a geç.
@@ -885,7 +887,11 @@ araç sabitleme (pinning) olarak kalıyor. Gerçek olaylarda (lab) yanlış alar
 işaretleniyor, organizatörlerin yayımladığı 160 zararsız e-posta (llmail_fp) her iki modelde ve her iki eşikte 0/160.
 E-posta saldırılarında ise yeni model öncekinden geride: başarılı LLMail saldırılarında yakalama önceki varsayılanda
 %99 (eşik 0.9), yenide %86 (0.9) ve %92 (0.3); diğer saldırı denemelerinde %95, %82 ve %89. E-posta ve takvim gibi
-kanallar için önceki model (mix-ab4-lab-30, eşik 0.9) bu sette daha iyi.
+kanallar için önceki model (mix-ab4-lab-30, eşik 0.9) bu sette daha iyi; bu kanallar için hazır bir politika var:
+[policy-eposta.example.yaml](policy-eposta.example.yaml). Poligondaki 10 el yazısı e-posta saldırısı iki modeli ayırt
+etmiyor (ML'in engellediği her saldırı 1,000 aldı, ikisi de yalnız "dolaylı iş cümlesi"ni kaçırdı), yani bu öneri
+LLMail sayılarına dayanıyor. Bedeli: DLP kapalıyken önceki model zararsız bir "deploy anahtarı" e-postasını 0,995 ile
+engelledi, yeni model engellemedi; DLP açıkken ikisi de engellemedi ([poligon/README.md](poligon/README.md)).
 
 **Rol istemleri ve `prompts/get`:** prompt sunucularının döndürdüğü şablonlar çoğunlukla rol veya sistem istemidir.
 Ölçüm için iki modelin de eğitimde görmediği 3.185 zararsız rol istemi kullanıldı (awesome-chatgpt-prompts CC0,

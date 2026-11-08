@@ -1,0 +1,108 @@
+# Tuuf MCP Firewall: e-posta ve takvim sunucuları için politika örneği
+#
+# Neden ayrı bir dosya? Varsayılan model (mixraw-ab4-evilsandangels-30, eşik 0,3) gerçek trafikteki yanlış alarmı
+# düşürdü, ama e-posta kanalında önceki varsayılanın gerisinde: başarılı LLMail saldırılarında yakalama
+# mix-ab4-lab-30 ile %99 (eşik 0,9), yeni modelle %92 (eşik 0,3) ve %86 (eşik 0,9) (README: "Varsayılan model").
+# Bu dosyayı yalnızca e-posta, takvim gibi dışarıdan metin getiren sunucuların firewall'una verin:
+#   mcp-firewall --policy ./policy-eposta.example.yaml --name eposta -- <sunucu komutu>
+# Diğer sunucular policy.example.yaml (varsayılan model) ile çalışmaya devam eder.
+#
+# policy.example.yaml'dan farkları:
+#   - önceki model (mix-ab4-lab-30) ve eşik 0,9; modeller models/ altında durmalı, yoksa firewall başlamaz
+#   - uzun metinde taranamayan orta kısım engellenir (dolgu saldırısı); çok uzun bültenler de engellenebilir
+#   - taint e-posta okuyan tool'ları kaynak, gönderen tool'ları çıkış sayar ve kullanıcıya sorar
+# Tool adları sunucudan sunucuya değişir: aşağıdaki kalıplar (snake_case) örnektir, kendi sunucunuzun adlarına
+# uyarlayın. Kalıplar büyük-küçük harfe duyarlıdır (sendMessage, "send_*" ile eşleşmez).
+version: 1
+
+# enforce: ihlalleri engeller | monitor: sadece loglar (ilk kurulumda önerilir)
+mode: enforce
+
+audit:
+  enabled: true
+  file: ./mcp-firewall-audit.jsonl   # diğer sunucularla aynı dosya: panel hepsini tek yerde gösterir
+  logAllowed: true
+
+tools:
+  default: allow
+  rules:
+    - match: "delete_*"
+      action: deny
+      reason: "Silme işlemleri bu ortamda yasak"
+
+methods:
+  deny:
+    - "sampling/createMessage"
+    - "elicitation/create"
+
+descriptionScan:
+  enabled: true
+  action: hide
+  hiddenUnicode: true
+  useDefaults: true
+
+decoding:
+  enabled: true               # base64, ROT13, hex, görünmez Unicode, benzer harfler: e-postada sık kullanılan gizleme
+
+hiddenText:
+  action: strip
+
+pinning:
+  enabled: true
+  file: ./mcp-firewall-pins.json   # tüm sunucular aynı dosyayı kullanmalı
+  onChange: hide
+  onNew: allow
+  onNameCollision: warn
+  serverCode: block
+  prompts: block
+
+dlp:
+  enabled: true
+  scanRequests: true
+  scanResponses: true
+  action: redact
+
+approval:
+  timeoutSeconds: 120
+  fallback: deny              # istemci elicitation desteklemiyorsa gönderim reddedilir
+  remember: false             # "bu oturum boyunca izin ver" seçeneği yok: her gönderim ayrı sorulur
+
+# Okunan e-posta metni giden bir tool'un argümanında görülürse (iletme, yanıt, davet) kullanıcıya sorulur.
+# block yerine ask: meşru iletme onayla geçer (poligonda block, iç kişiye yapılan meşru iletmeyi de engelledi).
+taint:
+  enabled: true
+  action: ask
+  scope: shared
+  ttlMinutes: 60
+  sources:                    # sonuçları oturumu etiketleyen tool'lar
+    - match: "read_*"
+    - match: "get_*"
+    - match: "list_*"         # list_emails konu satırları da saldırı taşıyabilir
+    - match: "search_*"
+  sinks:                      # veriyi dışarı taşıyabilen tool'lar (when: content, varsayılan)
+    - match: "send_*"
+    - match: "forward_*"
+    - match: "reply_*"
+    - match: "create_event"   # katılımcı eklemek de dışarıya açılan bir kanaldır
+    - match: "update_event"
+    # Daha katı: e-posta okunduktan sonra her gönderim sorulur; özetlenmiş ya da çevrilmiş veriyi de yakalar
+    # (içerik modu yakalayamaz), ama onay sayısı artar:
+    # - match: "send_*"
+    #   when: session
+
+# Katman 2: ML prompt-injection sınıflandırıcısı (yerel ONNX, internete çıkmaz)
+ml:
+  enabled: true
+  model: ./models/mcp-pi-mmbert-mix-ab4-lab-30   # önceki varsayılan; skorları 0,9 eşiğine göre ayarlı
+  dtype: fp32
+  injectionLabel: INJECTION
+  threshold: 0.9              # varsayılan model (mixraw-ab4-evilsandangels-30) 0,3 ister; bu modelle 0,3 kullanmayın
+  failMode: closed
+  chunkChars: 1500
+  maxChunks: 32               # 48.000 karakterden uzun metin: baştan ve sondan taranır, ortası taranamaz
+  onTruncated: block          # taranamayan metni engelle (dolgu saldırısı); bültenler için warn
+  scan:
+    toolDefinitions: hide
+    toolResults: block        # e-posta gövdesi ve konu satırı
+    promptResults: warn
+    serverRequests: block

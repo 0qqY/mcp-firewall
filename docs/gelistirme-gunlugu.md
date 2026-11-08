@@ -581,3 +581,19 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     uygulamanın MCP bağlantısıyla denemesi yapılmadı (oturumdaki `github` MCP, Docker kapalı olduğundan
     bağlanamamıştı; Docker bu oturumda açıldı, yeniden bağlanması kullanıcıya kalıyor). Test issue'su #1, deney sonunda
     kullanıcının onayıyla kapatıldı (`not_planned`, `node poligon/github.mjs temizle`). 171/171 test (src değişmedi). Commit yok.
+89. **E-posta ve takvim sunucuları için ayrı politika örneği, poligonda model karşılaştırması (08.11.2026):** Kullanıcı
+    önerilen sırada e-posta politikasına geçilmesini istedi. `policy-eposta.example.yaml` eklendi: önceki model
+    (mix-ab4-lab-30) ve eşik 0,9 (başarılı LLMail saldırılarında yakalama %99; yeni varsayılan %92 @0,3, %86 @0,9),
+    `ml.onTruncated: block`, `taint.action: ask` (kaynak `read_*`/`get_*`/`list_*`/`search_*`, çıkış `send_*`/`forward_*`/
+    `reply_*`/`create_event`/`update_event`), `approval.remember: false`. Gerçek politika yükleyicisiyle okundu, modeli
+    `./models/` altında buldu. Poligon sürücüsüne `POLIGON_ESIK` eklendi (varsayılan 0,3; `MCP_FIREWALL_MODEL` vardı).
+    Aynı 10 saldırı ve 2 kontrol üç ayarla koşuldu (yeni @0,3, yeni @0,9, önceki @0,9; tek çalıştırma): üçünde de
+    kapalıyken 10/10 sızdı, okuma 1/10 ("dolaylı iş cümlesi"), çıkış ve tam 0/10 (meşru iletme taint `block` ile yanlış
+    engellendi); ML'in engellediği her saldırı 1,000 aldı. Yani poligon iki modeli ayırt etmiyor; önerinin dayanağı
+    LLMail ölçümü. Fark yanlış alarmda: DLP kapalı okuma profilinde önceki model zararsız "deploy anahtarı" e-postasını
+    (#2) 0,995 ile engelledi (12/12 koşu), yeni model hiç engellemedi; DLP açık tam profilde ikisi de engellemedi.
+    Örnek politika geçici klasörde sahte posta sunucusuyla denendi: zararsız e-postalar geçti, düz İngilizce talimat ML
+    1,000 ile engellendi, okunan metni iç kişiye iletmek `ask` gerektirip istemci soramadığı için reddedildi, yeni
+    yazılmış metin gitti. Yan bulgu: `tools.rules` ve `taint` kalıpları (glob) büyük-küçük harfe duyarlı ve ham tool
+    adına bakıyor (`sendMessage`, `send_*` ile; `deleteFile`, `delete_*` ile eşleşmez); düzeltilmedi. Gerçek bir e-posta
+    sunucusuyla ve gerçek Claude Code ile denenmedi. 171/171 test (src değişmedi). Commit yok.
