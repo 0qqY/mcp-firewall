@@ -60,7 +60,7 @@ methods:
 descriptionScan:
   enabled: true
   action: hide                # hide: şüpheli tanımı listeden çıkar | warn: sadece logla
-  hiddenUnicode: true         # sıfır genişlikli / bidi / tag karakterleri, ANSI kaçış kodları
+  hiddenUnicode: true         # sıfır genişlikli / bidi / tag karakterleri, ANSI kaçış kodları, Kiril/Yunan benzer harf karışımı olan araç adları, okunamayan gömülü ikili içerik
   useDefaults: true           # yerleşik tool poisoning kalıpları
   patterns: []                # ek regex'ler
 
@@ -102,7 +102,7 @@ dlp:
   scanResponses: true         # tool / resource / prompt sonuçları
   action: redact              # redact | block | warn
   # detectors: [private_key, aws_access_key, github_token, slack_token,
-  #             anthropic_key, openai_key, jwt, credit_card, iban_tr, tckn]  # boşsa hepsi
+  #             anthropic_key, openai_key, stripe_key, jwt, credit_card, iban_tr, tckn]  # boşsa hepsi
   custom:                     # özel kalıplar büyük/küçük harf duyarlıdır
     - name: internal_hostname
       pattern: '\b[a-z0-9-]+\.corp\.internal\b'

@@ -1,4 +1,4 @@
-import { withDecoded } from './decode.js';
+import { mixesLookAlikes, opaqueBlobs, withDecoded } from './decode.js';
 import { isObject, type JsonObject } from './jsonrpc.js';
 import { checkPaths } from './paths.js';
 import type { Policy, ToolRule } from './policy.js';
@@ -146,5 +146,11 @@ export function scanText(policy: Policy, text: string): string[] {
 
 /** Looks for prompt-injection markers anywhere in a definition, including schema descriptions and parameter names. */
 export function scanToolDefinition(policy: Policy, tool: JsonObject): string[] {
-  return scanText(policy, definitionText(tool));
+  const hits = scanText(policy, definitionText(tool));
+  if (policy.descriptionScan.hiddenUnicode) {
+    // Look-alike letters in a name imitate another tool; embedded binary data is content nobody can inspect.
+    if (typeof tool.name === 'string' && mixesLookAlikes(tool.name)) hits.push('tool name mixes Latin letters with look-alike Cyrillic or Greek letters');
+    for (const kind of opaqueBlobs(tool)) hits.push(`uninspectable embedded content (${kind})`);
+  }
+  return hits;
 }

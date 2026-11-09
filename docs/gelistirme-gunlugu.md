@@ -626,3 +626,52 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     paneli dahil yerel servisleri görür, README'ye yazıldı. Yan etki: Docker Desktop bu oturumda açıldı. Eksik: adres bazlı
     çıkış izin listesi (Docker sunmuyor; iç ağ + proxy gerekir), sürümü sabit paketle image kuran `sandbox build` yardımcısı,
     Podman, macOS/Linux; README'deki Dockerfile örneği derlenmedi. Commit yok.
+91. **Yayımlanmış benchmark'larla ölçüm ve rakip karşılaştırması (09.11.2026):** Rakip karşılaştırması bu kez birincil
+    kaynaklara (ürünlerin README ve belge sayfaları) ve yayımlanmış benchmark'lara dayandırıldı; hiçbir rakip
+    çalıştırılmadı. Agent Egress Bench'in (PipeLab, korpus v2.16.0) 270 vakasından MCP biçimli 87'si ölçüldü: kendi
+    çalıştırıcım (`bench/aeb/run.mjs`; çalıştırıcıya ait üst akış dinleyicisi, teslim kanıtı, yapısal ret işareti, stdio
+    için CLI, HTTP için gateway, vaka başına yeni süreç ve yalıtılmış HOME) dört yapılandırmada koştu. Katı engelleme:
+    politikasız %18, kurulu politika %24, `policy.example.yaml`+ML %44, +`dlp.action: block` %53; zararsız 25 vakada
+    yanlış alarm 0–1. En güçlü yapılandırmada kaçırılan 29 vakanın 17'si README'de iddia edilmeyen alanlar (kabuk gizleme,
+    kripto, çağrı bütçesi, istemci argümanında enjeksiyon, zincir sezgileri), 1'i `taint` oturum moduyla kapanıyor (sondaj
+    koşusuyla kanıtlandı), 10'u mevcut özelliklerin kenar durumları: `decode.ts` ara katman hash gibi göründüğü için
+    base64(hex(...))'e inmiyor; istek argümanında sıfır genişlikli karakter; komşu alanlara bölünmüş sır; DLP'de
+    `sk_test_` kalıbı yok; aynı envanterde Kiril/Latin benzeri araç adı; `tools/list` yanıtındaki `instructions`; sahte
+    PNG başlığı arkasındaki kimlik bilgisi; araç tanımında `_meta` içindeki opak içerik. Tek yanlış alarm:
+    `[REDACTED_BY_TOOL]` yer tutucusu ML'de 0,967 (yalnızca ürünün kendi `[REDACTED:…]` işareti nötrleniyor). BIPIA'nın
+    Liu 2026 yöntemiyle kurulan eşleşmiş kümesi (1.200 zararsız + 2.435 enjekte; makalenin sayılarıyla birebir) üç modelle
+    ve ProtectAI v2 taban çizgisiyle puanlandı; taban çizgisi benchmark'ın kayıtlı skorlarını yeniden üretti (TPR@%1YA
+    %0,7 = %0,7). B30 %1 yanlış alarmda %23,6 (e-posta %22, tablo %17, eğitimde ailesini gördüğü kod %98); gönderilen eşik
+    0,3'te zararsız bağlamların %21'i işaretleniyor. Eğitim kümesi InjecAgent ve AgentDojo hedeflerini ve BIPIA'nın
+    yalnızca kod saldırılarını içerdiğinden sonuçlar suit bazında verildi; AgentDojo ve tau-bench ölçülmedi (üçüncü taraf
+    kodu çalıştırma izni verilmedi). Düzenek doğrulaması: `defaults` ikinci koşuda 87/87 aynı sonuç, Python
+    `extractMlText` taşıması derlenmiş TypeScript'le 600 örnekte sıfır farkla eşleşti. Dosyalar:
+    `docs/benchmark-karsilastirmasi.md`, `bench/` (betikler, ham sonuçlar). Yan etki: ilk duman testleri `defaults`
+    profiliyle çalışırken gerçek `~/.mcp-firewall/mcp-firewall-audit.jsonl` dosyasına 27 satır (`server: aeb`) ve pin
+    dosyasına bir `aeb` girdisi yazdı; kaynak kapatıldı (HOME yalıtımı + koşu sonu sayaç denetimi), temizlik kullanıcıya
+    bırakıldı. Commit yok.
+92. **Kenar durum boşlukları kapatıldı (09.11.2026):** 91'deki ölçümün "mevcut özelliğin kenar durumu" sınıfındaki 10 AEB
+    vakası için kod düzeltildi; 12 yeni test, 212/212. (1) `decode.ts`: base64(hex(...)) çözülmüyordu, çünkü ara katman
+    (rakam ağırlıklı hex) "okunabilir metin" kuralına takılıp atılıyordu; `DECODERS`'a üçüncü eleman olarak `layer`
+    eklendi: ara katman yalnızca yazdırılabilir ASCII ve tek bir kodlanmış koşuysa (`ENCODED_RUN`) içine inilir, ara
+    katman kaydedilmez. (2) `dlp.ts`: `scanText` görünmez karakterleri (`stripInvisible`: yumuşak tire, sıfır genişlikli,
+    bidi, tag, varyasyon seçici) atlayarak tarıyor; temizlenmiş kopya yalnızca secret bulununca iletilen metnin yerini
+    alıyor. (3) `dlp.ts`: `splitFindings` yan yana duran en çok 4 kısa (en çok 128 karakter) dizgiyi birleştirip yalnızca
+    sabit önekli dedektörlerle (AWS, GitHub, Slack, Anthropic, OpenAI, Stripe) arıyor ve alan sınırını geçen eşleşmeleri
+    sayıyor; rakam desenleri (kart, TCKN, IBAN) bilerek dışarıda, çünkü rastgele eşleşir. Böyle bir secret yerinde
+    maskelenemediği için `proxy.ts` `applyDlp` onu `dlp.action: warn` dışında engelliyor. (4) `dlp.ts`: `mediaFindings`
+    `image`/`audio` ve resource `blob` baytlarının yazdırılabilir koşularını DLP'den geçiriyor (sahte PNG başlığı
+    arkasındaki kimlik bilgisi); kart/TCKN/IBAN hariç, 8 MB sınırı; bulunursa engel. (5) `dlp.ts`: `stripe_key`
+    (`sk_`/`rk_` + `test`/`live`). (6) `engine.ts`/`decode.ts`: `scanToolDefinition` bir sözcükte Latin harfi ile
+    Kiril/Yunan benzerini karıştıran araç adını (`mixesLookAlikes`) ve tanımda `data` + `mimeType` ya da `encoding:
+    base64` taşıyan, ne gerçek görsel ne okunur metin olan nesneyi (`opaqueBlobs`, `looksBinary`) işaretliyor; ikisi de
+    `descriptionScan.hiddenUnicode`'a bağlı, yeni ayar yok. (7) `proxy.ts` `filterToolsList`: `tools/list` yanıtındaki
+    `instructions` artık `initialize`'dakiyle aynı taramadan geçiyor (düşmanca olan siliniyor, yanıt iletiliyor). Ölçüm:
+    aynı AEB çalıştırıcısı ve dört yapılandırma, düzeltilmiş derlemeyle: katı engelleme %18→%31, %24→%37, %44→%56,
+    %53→%68; 10 hedeften 9'u katı engele döndü, `mcp-tool-instructions-exfil-017` etkisizleştirip iletiyor; bozulan vaka
+    ve yeni yanlış alarm yok; son iyileştirmeden (`looksBinary`) önceki ve sonraki derleme iki koşuda birebir aynı çıktı
+    verdi. Maliyet: 50.000 kısa dizgili dizi 191 ms, 3.000 kayıt × 6 alan 72 ms, 5 MB görsel 12 ms. Yan etki: `sk_test_…`
+    anahtarları (belge örnekleri dahil) artık maskeleniyor. Dosyalar: README tehdit eşlemesi ve sınırlamalar,
+    `policy.example.yaml` yorumları, `docs/tehdit-kapsami.md` DLP satırları, `docs/benchmark-karsilastirmasi.md` 2.5,
+    `bench/sonuclar/*-sonrasi*`. Kalan: `[REDACTED_BY_TOOL]` yanlış alarmı (yalnızca ürünün kendi `[REDACTED:…]` işareti
+    nötrleniyor). Commit yok.

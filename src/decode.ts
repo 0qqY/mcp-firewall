@@ -30,13 +30,34 @@ function bytesToText(bytes: Uint8Array): string | undefined {
   }
 }
 
-function fromBase64(run: string): string | undefined {
+function base64Bytes(run: string): Buffer | undefined {
   const std = run.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
   if (std.length % 4 === 1) return undefined;
-  return bytesToText(Buffer.from(std, 'base64'));
+  return Buffer.from(std, 'base64');
 }
 
+const fromBase64 = (run: string): string | undefined => {
+  const bytes = base64Bytes(run);
+  return bytes && bytesToText(bytes);
+};
+
 const fromHex = (run: string): string | undefined => bytesToText(Buffer.from(run, 'hex'));
+
+/**
+ * The printable ASCII an encoded run holds when that is not text yet: the middle layer of a nested encoding.
+ * Base64 of a hex string comes out as digits and a-f, which `readable` rejects, so without this the hex layer
+ * underneath is never reached.
+ */
+function printableAscii(bytes: Uint8Array | undefined): string | undefined {
+  if (!bytes || bytes.length < 16) return undefined;
+  for (const b of bytes) if (b < 0x20 || b > 0x7e) return undefined;
+  return Buffer.from(bytes).toString('latin1');
+}
+
+/** A string that is nothing but one encoded run: all hex digits, or all base64 / base64url characters. */
+const ENCODED_RUN = /^(?:[0-9a-fA-F]{2}){12,}$|^[A-Za-z0-9+/_-]{20,}={0,2}$/;
+/** Mixed case or digits keeps ordinary long words out of the base64 decoder cheaply. */
+const looksBase64 = (run: string): boolean => /[a-z]/.test(run) && /[A-Z0-9]/.test(run);
 
 function fromPercent(run: string): string | undefined {
   try {
@@ -112,11 +133,16 @@ function fromRot13(run: string): string | undefined {
   return words >= 3 && common >= 2 && common >= words * 0.3 && common > commonWords(run)[1] * 2 ? decoded : undefined;
 }
 
-/** Each encoding: where it may occur, and how to decode one occurrence. */
-const DECODERS: [RegExp, (run: string) => string | undefined][] = [
-  // At least 20 base64 characters; mixed case or digits keeps ordinary long words out cheaply.
-  [/[A-Za-z0-9+/_-]{20,}={0,2}/g, (run) => (/[a-z]/.test(run) && /[A-Z0-9]/.test(run) ? fromBase64(run) : undefined)],
-  [/\b(?:[0-9a-fA-F]{2}){12,}\b/g, fromHex],
+type Decoder = [pattern: RegExp, decode: (run: string) => string | undefined, layer?: (run: string) => string | undefined];
+
+/**
+ * Each encoding: where it may occur, how to decode one occurrence and, for base64 and hex, how to read an
+ * occurrence that is not text but may carry another encoding (`layer`).
+ */
+const DECODERS: Decoder[] = [
+  // At least 20 base64 characters.
+  [/[A-Za-z0-9+/_-]{20,}={0,2}/g, (run) => (looksBase64(run) ? fromBase64(run) : undefined), (run) => (looksBase64(run) ? printableAscii(base64Bytes(run)) : undefined)],
+  [/\b(?:[0-9a-fA-F]{2}){12,}\b/g, fromHex, (run) => printableAscii(Buffer.from(run, 'hex'))],
   [/(?:%[0-9a-fA-F]{2}|[A-Za-z0-9._~+-]){0,40}(?:%[0-9a-fA-F]{2}[A-Za-z0-9._~+-]*){4,}/g, fromPercent],
   [/(?:\\u[0-9a-fA-F]{4}|\\x[0-9a-fA-F]{2}){6,}/g, fromEscapes],
   [/(?:&#(?:x[0-9a-fA-F]+|\d+);){6,}/g, fromEntities],
@@ -176,10 +202,17 @@ export function decodeEmbedded(text: string): string[] {
   };
   const visit = (source: string, depth: number): void => {
     for (const joined of joinPieces(source)) if (!keep(joined, depth)) return;
-    for (const [pattern, decode] of DECODERS) {
+    for (const [pattern, decode, layer] of DECODERS) {
       for (const match of source.matchAll(pattern)) {
         if (match[0].length > MAX_RUN_CHARS) continue;
-        if (!keep(decode(match[0]), depth)) return;
+        const decoded = decode(match[0]);
+        if (decoded === undefined && layer && depth < MAX_DEPTH) {
+          // Not text, but possibly another encoding on top of this one (base64 of hex): look inside, keep nothing.
+          const inner = layer(match[0]);
+          if (inner !== undefined && ENCODED_RUN.test(inner)) visit(inner, depth + 1);
+          continue;
+        }
+        if (!keep(decoded, depth)) return;
       }
     }
   };
@@ -250,6 +283,24 @@ export function deobfuscate(text: string): string {
   return out;
 }
 
+/**
+ * Characters that show nothing and can be dropped into a secret to break a pattern match: soft hyphen, zero-width
+ * characters (ZWNJ and ZWJ too: nobody needs them inside a key), bidi marks, word joiners, BOM, Unicode tag
+ * characters and variation selectors. Used only to look through them, never to rewrite what is forwarded.
+ */
+const INVISIBLE = /[­᠎​-‏‪-‮⁠-⁤⁦-⁩﻿︀-️]|[\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu;
+
+export const stripInvisible = (text: string): string => text.replace(INVISIBLE, '');
+
+/**
+ * True when one word mixes Latin letters with Cyrillic or Greek look-alikes ("reаd_file" with a Cyrillic а): a name
+ * that imitates another one. Words are split at everything that is not a letter, so a bilingual name such as
+ * "поиск_files" (each word in one script) passes.
+ */
+export function mixesLookAlikes(name: string): boolean {
+  return (name.match(/[\p{L}\p{M}]+/gu) ?? []).some((word) => /[A-Za-z]/.test(word) && [...word].some((c) => c in HOMOGLYPHS));
+}
+
 const IMAGE_DATA_URI = /data:image\/(?:png|jpe?g|gif|webp|x-icon|vnd\.microsoft\.icon);base64,([A-Za-z0-9+/]+={0,2})/gi;
 /** File signatures; a data URI only counts as an image when its bytes start with one. */
 const IMAGE_MAGIC = ['89504e470d0a1a0a', 'ffd8ff', '47494638', '52494646', '00000100'];
@@ -265,6 +316,42 @@ export function stripImageData(text: string): string {
     const head = Buffer.from(b64.slice(0, 16), 'base64').toString('hex');
     return IMAGE_MAGIC.some((m) => head.startsWith(m)) ? 'image' : uri;
   });
+}
+
+/** Bytes that are not text: not valid UTF-8, or full of control characters. Even a few readable words are text. */
+function looksBinary(bytes: Uint8Array): boolean {
+  let text: string;
+  try {
+    text = utf8.decode(bytes);
+  } catch {
+    return true;
+  }
+  const control = text.match(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g)?.length ?? 0;
+  return control / Math.max(text.length, 1) > 0.1;
+}
+
+/**
+ * Base64 payloads a definition carries that neither the firewall nor the user can read: `{ mimeType, data }` or
+ * `{ encoding: "base64", data }` objects whose bytes are neither text nor a real image (an icon is fine, a PDF or
+ * an executable inside a tool definition is not). Returns the declared media type of each, or "base64".
+ */
+export function opaqueBlobs(value: unknown): string[] {
+  const found: string[] = [];
+  const walk = (v: unknown): void => {
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (typeof v !== 'object' || v === null) return;
+    const o = v as Record<string, unknown>;
+    const mime = typeof o.mimeType === 'string' ? o.mimeType : typeof o.mediaType === 'string' ? o.mediaType : undefined;
+    const declared = o.encoding === 'base64' || o.contentEncoding === 'base64';
+    if (typeof o.data === 'string' && o.data.length >= 8 && /^[A-Za-z0-9+/_-]+={0,2}$/.test(o.data) && (declared || mime !== undefined)) {
+      const bytes = base64Bytes(o.data);
+      const head = bytes?.subarray(0, 8).toString('hex') ?? '';
+      if (bytes && !IMAGE_MAGIC.some((m) => head.startsWith(m)) && looksBinary(bytes)) found.push(mime ?? 'base64');
+    }
+    Object.values(o).forEach(walk);
+  };
+  walk(value);
+  return found;
 }
 
 /**

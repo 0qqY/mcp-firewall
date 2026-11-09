@@ -21,9 +21,9 @@ Host ──HTTP───► mcp-firewall gateway ──HTTPS──► Uzak MCP s
 | Riskli ama gerekli çağrılar | `action: ask`: çağrı bekletilir, kullanıcıya MCP onay penceresiyle (elicitation) sorulur; reddedilen, cevapsız kalan ya da sorulamayan çağrı engellenir |
 | Path traversal | `paths`: yol argümanları kanonik biçimde (`%2e%2e`, `file://`, `~`, `..` çözülmüş, sembolik bağ/junction izlenmiş; Windows'ta kısa adlar, sondaki nokta/boşluk, `::$DATA`) izinli kök dizinlere ve yasak kalıplara göre denetlenir; ağ (UNC) ve aygıt yolları reddedilir |
 | Komut enjeksiyonu | Argüman bazlı `deny` / `allow` regex'leri, `"*"` ile tüm iç içe değerler |
-| Tool poisoning | `descriptionScan`: açıklama, şema değerleri **ve parametre adları** içinde injection kalıpları ve gizli Unicode/ANSI |
+| Tool poisoning | `descriptionScan`: açıklama, şema değerleri **ve parametre adları** içinde injection kalıpları ve gizli Unicode/ANSI; bir sözcükte Latin harfleriyle Kiril/Yunan benzerlerini karıştıran araç adları (Kiril "а" ile yazılmış `read_file` taklidi) ve tanımda gömülü, okunamayan ikili içerik (PDF, çalıştırılabilir) de gizlenir (`hiddenUnicode`) |
 | Full-schema poisoning | Parametre adları (`readSshKey` → "read ssh key") regex ve ML taramasına dahil |
-| Zehirli sunucu talimatları, prompt/resource listeleri | `initialize` ve `server/discover` (MCP 2026-07-28) yanıtlarındaki `instructions`, `prompts/list`, `resources/list`, `resources/templates/list` taranır; zehirli olan çıkarılır |
+| Zehirli sunucu talimatları, prompt/resource listeleri | `initialize` ve `server/discover` (MCP 2026-07-28) yanıtlarındaki `instructions`, `prompts/list`, `resources/list`, `resources/templates/list` taranır; bir `tools/list` yanıtına konan `instructions` da aynı şekilde taranır; zehirli olan çıkarılır |
 | Zehirli prompt şablonu | `prompts/get` sonucu tanım desenleri ve gizli karakter kontrolünden geçer, eşleşen reddedilir; ML bulgusu varsayılan olarak yalnızca uyarıdır (`ml.scan.promptResults`) |
 | Rug pull | `pinning`: tool tanımlarının SHA-256 hash'i (TOFU), değişen tanım gizlenir; çıktı şeması ayrı hash'lendiği için pin her MCP sürümünde tutar |
 | Prompt şablonu rug pull'u | `pinning.prompts`: şablon, argüman değerleri çıkarılarak hash'lenir; onaydan sonra değişen şablon reddedilir |
@@ -33,12 +33,12 @@ Host ──HTTP───► mcp-firewall gateway ──HTTPS──► Uzak MCP s
 | Sunucular arası tool gölgeleme | `pinning.onNameCollision`: başka sunucunun da sunduğu tool adı uyarılır veya gizlenir |
 | Hata mesajıyla zehirleme (ATPA) | JSON-RPC `error` yanıtları da DLP, gizli karakter ve ML taramasından geçer |
 | Görünmez talimatlar, ANSI ile gizleme | `hiddenText`: sonuç, hata ve sampling içeriğindeki görünmez karakterler ve terminal kaçış kodları temizlenir |
-| Veri sızdırma | `dlp.scanRequests`: argümanlardaki secret/PII maskeleme veya engelleme |
+| Veri sızdırma | `dlp.scanRequests`: argümanlardaki secret/PII maskeleme veya engelleme; görünmez karakterlerle (sıfır genişlikli vb.) bölünmüş anahtarlar da bulunur, komşu alanlara bölünmüş anahtarlar (`access_key` + `key_suffix`) yerinde maskelenemeyeceği için `warn` dışında engellenir |
 | Formatsız veri sızdırma (toxic flow) | `taint`: kaynak tool'ların döndürdüğü metnin özetleri oturum boyunca tutulur; bu metni (düz, büyük-küçük harf değişmiş ya da base64'lenmiş) argümanında taşıyan çıkış tool'u engellenir. Aynı istemcinin sunucuları etiketleri paylaşır |
-| Secret/PII'nin modele sızması | `dlp.scanResponses`: tool/resource/prompt sonuçlarında maskeleme |
+| Secret/PII'nin modele sızması | `dlp.scanResponses`: tool/resource/prompt sonuçlarında maskeleme; sahte görsel başlığının arkasına konmuş metin sırları (`image`/`audio`/`blob` içinde) engellenir |
 | Server'ın LLM'ini kötüye kullanması | `methods.deny: [sampling/createMessage]`, ya da izin verilirse içerik taraması (`ml.scan.serverRequests`) ve `sampling` sınırları: dakika/oturum başına istek, istek başına `maxTokens` tavanı, oturum token bütçesi |
 | Kullanıcıya oltalama | `methods.deny: [elicitation/create]` veya içerik taraması (`ml.scan.serverRequests`) |
-| Kodlanmış injection ve sızdırma | `decoding`: base64, hex, %XX, `\u`/`\x` kaçışları, HTML varlıkları, ROT13 ve görünmez Unicode (TAG, varyasyon seçicisi) çözülüp, birleştirilmesi istenen parçalar (`'ign' + 'ore'`, `a + b`) birleştirilip desen, ML ve DLP taramasına eklenir; base64'lenmiş secret içeren çağrı engellenir |
+| Kodlanmış injection ve sızdırma | `decoding`: base64, hex, %XX, `\u`/`\x` kaçışları, HTML varlıkları, ROT13 ve görünmez Unicode (TAG, varyasyon seçicisi) çözülüp, birleştirilmesi istenen parçalar (`'ign' + 'ore'`, `a + b`) birleştirilip desen, ML ve DLP taramasına eklenir; base64'lenmiş secret içeren çağrı engellenir; iç içe kodlama iki katmana kadar açılır (base64 içinde hex dahil) |
 | Karakter düzeyinde gizleme | `decoding`: l33t, harf aralama (`i g n o r e`), Kiril/Yunan benzer harfler, tam genişlikli harfler ve rastgele büyük-küçük harf geri alınır; ML düzeltilmiş metni görür |
 | Uzun çıktıyla dolgu | `ml.onTruncated: block`: tamamı taranamayan metin engellenir |
 | Bozuk/devasa mesajlar | Fail-closed parse, 32 MB satır limiti |
@@ -1031,6 +1031,11 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 - `taint` içerik modu kelimesi kelimesine (ya da kodlanmış/gizlenmiş biçimde) taşınan metni yakalar; özetlenmiş,
   yeniden yazılmış, çevrilmiş, dolgu kelimelerle bölünmüş ya da şifrelenmiş veriyi yakalamaz (bunun için
   `when: session`).
+- Komşu alanlara bölünmüş secret taraması, aynı nesnenin ya da dizinin yan yana duran en çok 4 kısa (en çok 128 karakter)
+  dizgisini birleştirir ve yalnızca sabit önekli anahtarları arar (AWS, GitHub, Slack, Anthropic, OpenAI, Stripe); araya
+  başka alan girerse yakalanmaz, parçalar ayrı çağrılara dağılırsa `taint` gerekir.
+- `image`/`audio`/`blob` içindeki metin taraması yalnızca DLP kalıplarını okur (ML bakmaz) ve 8 MB'a kadar çözer; tanımdaki
+  gömülü ikili içerik denetimi `data` ile `mimeType` ya da `encoding: base64` taşıyan nesneleri tanır.
 - JSON-RPC batch'leri tek tek mesajlar olarak iletilir.
 - `sandbox` Docker'ın yalıtımıdır, VM sınırı değildir. Ağ açıkken (`bridge`) sunucunun kendi bağlantısı görünmez ve adres bazlı
   izin listesi yoktur; bağlanan klasördeki veri sunucuya açıktır. Yalnızca Windows'ta Docker Desktop ile denendi.

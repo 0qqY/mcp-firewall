@@ -3,7 +3,7 @@ import type { Readable, Writable } from 'node:stream';
 import type { AuditEvent, AuditLog } from './audit.js';
 import type { CodeFingerprint } from './codepin.js';
 import { decodeEmbedded, stripImageData, withDecoded } from './decode.js';
-import { deepScan, formatFindings, REDACTION_MARKER } from './dlp.js';
+import { deepScan, formatFindings, REDACTION_MARKER, unredactableFindings } from './dlp.js';
 import {
   evaluateMethod,
   evaluateToolCall,
@@ -672,7 +672,21 @@ export class FirewallProxy {
     return this.violation(event, flag.reason) ? flag.reason : undefined;
   }
 
+  /**
+   * DLP over a value. Secrets found in place are masked or refused per `dlp.action`; secrets that cannot be masked in
+   * place (cut into neighbouring fields, hidden inside a media block) are refused, or only reported under `warn`.
+   */
   private applyDlp(value: unknown, ctx: Context, what: string): { value: unknown; blockReason?: string; found?: boolean } {
+    const { detectors, action } = this.policy.dlp;
+    const hidden = unredactableFindings(value, detectors);
+    if (hidden.length === 0) return this.applyRedactingDlp(value, ctx, what);
+    const reason = `sensitive data in ${what} that cannot be masked in place (split across fields or inside a media block): ${formatFindings(hidden)}`;
+    if (action === 'warn') this.audit.record({ ...ctx, verdict: 'warn', reason });
+    else if (this.violation(ctx, reason)) return { value, blockReason: reason, found: true };
+    return { ...this.applyRedactingDlp(value, ctx, what), found: true };
+  }
+
+  private applyRedactingDlp(value: unknown, ctx: Context, what: string): { value: unknown; blockReason?: string; found?: boolean } {
     const { detectors, action } = this.policy.dlp;
     const scan = deepScan(value, detectors);
     if (scan.findings.length === 0) return this.encodedDlp(value, ctx, what);
@@ -801,7 +815,9 @@ export class FirewallProxy {
   }
 
   /** Hides tools that are denied, look poisoned, changed since they were pinned, or shadow another server's tool. */
-  private async filterToolsList(result: JsonObject): Promise<JsonObject> {
+  private async filterToolsList(list: JsonObject): Promise<JsonObject> {
+    // Server `instructions` normally ride on the handshake, but a server can put them here too; the model reads them either way.
+    const result = await this.inspectInstructions(list, 'tools/list');
     const tools = (Array.isArray(result.tools) ? result.tools : []).filter(isObject);
     const names = tools.map((t) => String(t.name ?? ''));
     const { pinning } = this.policy;

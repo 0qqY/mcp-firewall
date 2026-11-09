@@ -1,0 +1,23 @@
+ProtectAI v2 check: 3635 rows, |ours - stored| mean 0.00440 max 0.83518, label order identical to the stored scores: True
+rows kept: 3635 (benign 1200, injected 2435); groups {np.str_('-'): np.int64(1200), np.str_('code-active'): np.int64(98), np.str_('code-passive'): np.int64(100), np.str_('targeted'): np.int64(733), np.str_('task-irrelevant'): np.int64(891), np.str_('task-relevant'): np.int64(613)}
+| detector | AUROC | TPR @1%FPR | thr@1% | FPR@0.5 | TPR@0.5 | FPR @ship | TPR @ship |
+|---|---|---|---|---|---|---|---|
+| B30 (raw view) | 0.702 | 0.236 | 0.844 | 0.083 | 0.355 | 0.217 (thr 0.3) | 0.487 |
+| B30 (product view) | 0.721 | 0.247 | 0.865 | 0.088 | 0.386 | 0.209 (thr 0.3) | 0.516 |
+| ab4lab30 (raw view) | 0.726 | 0.225 | 0.997 | 0.215 | 0.533 | 0.072 (thr 0.9) | 0.354 |
+| ab4lab30 (product view) | 0.741 | 0.222 | 0.998 | 0.220 | 0.565 | 0.068 (thr 0.9) | 0.385 |
+| soup04ab4 (raw view) | 0.721 | 0.196 | 0.999 | 0.278 | 0.593 | 0.097 (thr 0.9) | 0.381 |
+| soup04ab4 (product view) | 0.735 | 0.204 | 0.999 | 0.278 | 0.615 | 0.109 (thr 0.9) | 0.423 |
+| ProtectAI v2 (ours, onnxruntime CPU) | 0.314 | 0.007 | 1.000 | 0.139 | 0.090 | - | - |
+| ProtectAI v2 (stored by the benchmark) | 0.316 | 0.007 | 1.000 | 0.126 | 0.090 | - | - |
+
+| detector | code-active | code-passive | targeted | task-irrelevant | task-relevant | email | table | code |
+|---|---|---|---|---|---|---|---|---|
+| B30 (raw view) | 1.000 | 0.950 | 0.274 | 0.073 | 0.188 | 0.223 | 0.165 | 0.975 |
+| B30 (product view) | 1.000 | 0.970 | 0.302 | 0.079 | 0.188 | 0.238 | 0.176 | 0.985 |
+| ab4lab30 (raw view) | 1.000 | 1.000 | 0.265 | 0.055 | 0.176 | 0.369 | 0.135 | 1.000 |
+| ab4lab30 (product view) | 1.000 | 1.000 | 0.276 | 0.052 | 0.153 | 0.374 | 0.130 | 1.000 |
+| soup04ab4 (raw view) | 1.000 | 1.000 | 0.228 | 0.052 | 0.109 | 0.296 | 0.108 | 1.000 |
+| soup04ab4 (product view) | 0.990 | 1.000 | 0.256 | 0.047 | 0.114 | 0.335 | 0.114 | 0.995 |
+| ProtectAI v2 (ours, onnxruntime CPU) | 0.000 | 0.000 | 0.008 | 0.001 | 0.018 | 0.083 | 0.000 | 0.000 |
+| ProtectAI v2 (stored by the benchmark) | 0.000 | 0.000 | 0.008 | 0.001 | 0.018 | 0.083 | 0.000 | 0.000 |
