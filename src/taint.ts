@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { decodeEmbedded, deobfuscate } from './decode.js';
-import { extractText } from './ml/classifier.js';
+import { decodeEmbedded, deobfuscate, stripInvisible } from './decode.js';
+import { extractMessageText, extractText } from './ml/classifier.js';
 
 export interface TaintSource {
   pattern: string;
@@ -47,7 +47,9 @@ const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"'
 /**
  * Undoes the wrapping text picks up on its way between tools: JSON string escapes (once or twice: "\\n" glued
  * a newline's "n" onto the next word), HTML tags and entities, and invisible format characters (zero-width,
- * soft hyphen, bidi) that split words without showing. Fullwidth and other compatibility forms fold (NFKC).
+ * soft hyphen, bidi) that split words without showing. Variation selectors are marks, not format characters,
+ * so they go with `stripInvisible`: left in, they cut a base64 run in two and stop a camelCase split.
+ * Fullwidth and other compatibility forms fold (NFKC).
  */
 function unwrap(text: string): string {
   let out = text;
@@ -64,7 +66,7 @@ function unwrap(text: string): string {
       return code <= 0x10ffff ? String.fromCodePoint(code) : ' ';
     })
     .replace(/&([a-z]+);/g, (m, name: string) => ENTITIES[name] ?? m);
-  return out.replace(/\p{Cf}/gu, '').normalize('NFKC');
+  return stripInvisible(out.replace(/\p{Cf}/gu, '')).normalize('NFKC');
 }
 
 /**
@@ -190,7 +192,8 @@ export class TaintTracker {
     const live = this.marks.filter((m) => this.fresh(m) && (sink.labels.length === 0 || sink.labels.includes(m.label)));
     if (live.length === 0) return undefined;
     if (sink.when === 'session') return { ...this.describe(live[live.length - 1]), when: 'session', matches: 0 };
-    const text = extractText(args);
+    // Everything the call carries counts, whatever a field is called: `_meta`, a media block's side fields, a text blob.
+    const text = extractMessageText(args);
     const sent = fingerprints(text, this.sentTail);
     let best: TaintFlow | undefined;
     for (const mark of live) {

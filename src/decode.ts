@@ -217,6 +217,11 @@ export function decodeEmbedded(text: string): string[] {
     }
   };
   visit(text, 1);
+  // A character that shows nothing, dropped into an encoded run, cuts it in two (the pieces are too short to decode).
+  // The text is read once more without such characters; the raw text goes first because tag characters and
+  // variation selectors are an encoding of their own.
+  const clean = stripInvisible(text);
+  if (clean !== text) visit(clean, 1);
   return found;
 }
 
@@ -353,6 +358,27 @@ export function opaqueBlobs(value: unknown): string[] {
   walk(value);
   return found;
 }
+
+/** A long run of base64 characters and nothing else. */
+const BASE64_PAYLOAD = /^[A-Za-z0-9+/_-]{64,}={0,2}$/;
+
+/**
+ * Whether `value`, the string under `key` in `owner`, is a binary payload: a long base64 run in a field that carries
+ * bytes (a resource's `blob`, or the `data` of an image or audio block or of any object that names a media type or
+ * says it is base64). A string in such a field that is not a long base64 run is just text.
+ */
+export function isPayload(owner: Record<string, unknown>, key: string, value: string): boolean {
+  if (!BASE64_PAYLOAD.test(value)) return false;
+  if (key === 'blob') return true;
+  const media = owner.type === 'image' || owner.type === 'audio' || typeof owner.mimeType === 'string' || typeof owner.mediaType === 'string';
+  return key === 'data' && (media || owner.encoding === 'base64' || owner.contentEncoding === 'base64');
+}
+
+/**
+ * What a client that decodes a payload would show the model: the text inside the base64, or undefined for bytes that
+ * are not text (and for bulk payloads, which are files, not instructions).
+ */
+export const payloadText = (run: string): string | undefined => (run.length > MAX_RUN_CHARS ? undefined : fromBase64(run));
 
 /**
  * What the scanners read: the text with character-level obfuscation undone, plus everything decoded

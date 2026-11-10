@@ -5,10 +5,10 @@ import type { CodeFingerprint } from './codepin.js';
 import { decodeEmbedded, stripImageData, withDecoded } from './decode.js';
 import { deepScan, formatFindings, REDACTION_MARKER, unredactableFindings } from './dlp.js';
 import {
+  containsHiddenChars,
   evaluateMethod,
   evaluateToolCall,
   evaluateToolName,
-  hasHiddenChars,
   parameterNamesText,
   scanText,
   scanToolDefinition,
@@ -25,9 +25,10 @@ import {
   send,
   toolErrorResponse,
   type JsonObject,
+  type JsonRpcId,
   type JsonRpcMessage,
 } from './jsonrpc.js';
-import { extractMlText, extractText, scoreTexts, type Channel, type Classifier } from './ml/classifier.js';
+import { extractMessageText, extractMlText, extractText, scoreTexts, type Channel, type Classifier } from './ml/classifier.js';
 import { hashPromptTemplate, promptPinKey, type PinStatus, type PinStore } from './pinning.js';
 import type { Policy } from './policy.js';
 import { TaintTracker } from './taint.js';
@@ -160,7 +161,7 @@ export class FirewallProxy {
      * once the handshake has been answered, or earlier by the first scan that needs the model.
      */
     private readonly classifier?: Classifier | (() => Promise<Classifier>),
-    /** Fingerprints the server's code; called once, when the server answers the handshake (npx has installed it by then). */
+    /** Fingerprints the server's code; called once, when the server first speaks (npx has installed it by then). */
     private readonly serverCode?: () => CodeFingerprint,
   ) {
     const { taint } = policy;
@@ -392,6 +393,18 @@ export class FirewallProxy {
 
   private async fromServer(msg: JsonRpcMessage): Promise<void> {
     const direction = 'server->client';
+    // The first thing the server says, whatever it is. By now an npx package has been installed, so its code can be
+    // checked, and nothing may get ahead of that check: not a request sent before the handshake answer, and not a
+    // session that has no handshake at all (a client may open with any request).
+    if (!this.codeChecked) {
+      this.codeChecked = true;
+      const asked = isResponse(msg) ? this.pending.get(idKey(msg.id)) : undefined;
+      this.serverBlocked = this.checkServerCode(asked?.method ?? msg.method ?? 'initialize');
+      if (this.serverBlocked) {
+        this.refuseAll(this.serverBlocked);
+        return;
+      }
+    }
     let handshake = false;
     if (typeof msg.method === 'string') {
       // Server-initiated request or notification (sampling, elicitation, list_changed...).
@@ -423,14 +436,6 @@ export class FirewallProxy {
       const request = this.pending.get(idKey(msg.id));
       this.pending.delete(idKey(msg.id));
       handshake = request !== undefined && HANDSHAKES.has(request.method);
-      if (request && handshake && !this.codeChecked) {
-        this.codeChecked = true;
-        this.serverBlocked = this.checkServerCode(request.method);
-        if (this.serverBlocked) {
-          send(this.io.clientOut, errorResponse(msg.id, this.serverBlocked));
-          return;
-        }
-      }
       if (request && isObject(msg.result)) {
         if (request.method === 'tools/list') msg.result = await this.filterToolsList(msg.result);
         else if (request.method in DEFINITION_LISTS) msg.result = await this.filterDefinitions(msg.result, request.method);
@@ -443,6 +448,12 @@ export class FirewallProxy {
     send(this.io.clientOut, msg);
     // A client probing the protocol version stops waiting after a while, so the model loads only now.
     if (handshake && this.classifier) setImmediate(() => void this.loadModel().catch(() => undefined));
+  }
+
+  /** Answers every request the client still waits on, so a blocked server leaves none of them hanging. */
+  private refuseAll(reason: string): void {
+    for (const key of this.pending.keys()) send(this.io.clientOut, errorResponse(JSON.parse(key) as JsonRpcId, reason));
+    this.pending.clear();
   }
 
   /**
@@ -551,7 +562,7 @@ export class FirewallProxy {
     // A prompt template is server-written text the model takes as instructions, like a definition,
     // so the definition patterns apply to it whatever the ML setting is.
     if (isPrompt && descriptionScan.enabled) {
-      const hits = scanText(this.policy, extractText(msg.result));
+      const hits = scanText(this.policy, extractMessageText(msg.result));
       if (hits.length > 0) {
         const reason = `possible prompt poisoning: ${hits.join('; ')}`;
         if (descriptionScan.action === 'warn') this.audit.record({ ...ctx, verdict: 'warn', reason });
@@ -707,7 +718,7 @@ export class FirewallProxy {
    */
   private encodedDlp(value: unknown, ctx: Context, what: string): { value: unknown; blockReason?: string; found?: boolean } {
     if (!this.policy.decoding.enabled) return { value };
-    const decoded = decodeEmbedded(extractText(value));
+    const decoded = decodeEmbedded(extractMessageText(value));
     if (decoded.length === 0) return { value };
     const { findings } = deepScan(decoded, this.policy.dlp.detectors);
     if (findings.length === 0) return { value };
@@ -722,7 +733,7 @@ export class FirewallProxy {
   /** Invisible characters and terminal escapes hide text from the user that the model still reads. */
   private applyHiddenText(value: unknown, ctx: Context, what: string): { value: unknown; blockReason?: string } {
     const { action } = this.policy.hiddenText;
-    if (action === 'off' || !hasHiddenChars(extractText(value))) return { value };
+    if (action === 'off' || !containsHiddenChars(value)) return { value };
     const stripped = stripHiddenChars(value);
     const reason = `hidden characters or terminal escape sequences in ${what} (${stripped.removed})`;
     if (action === 'block') return { value, blockReason: this.violation(ctx, reason) ? reason : undefined };

@@ -675,3 +675,33 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     `policy.example.yaml` yorumları, `docs/tehdit-kapsami.md` DLP satırları, `docs/benchmark-karsilastirmasi.md` 2.5,
     `bench/sonuclar/*-sonrasi*`. Kalan: `[REDACTED_BY_TOOL]` yanlış alarmı (yalnızca ürünün kendi `[REDACTED:…]` işareti
     nötrleniyor). Commit yok.
+
+93. **Gemini incelemesi: üç bulgu yeniden üretildi ve kapatıldı (10.11.2026):** `gemini-inceleme/` paketiyle (çekirdek
+    + son tur farkı) Gemini'ye yaptırılan inceleme üç "kritik" bulgu verdi. Her biri önce gerçek koda (`dist/`,
+    yalıtılmış HOME) karşı yeniden üretildi, sonra başarısız test yazıldı, sonra düzeltildi: 8 yeni test, 220/220;
+    gerçek denetim kaydına dokunulmadı. (1a) DOĞRU: `decodeEmbedded` görünmez karakterlere bakmıyordu (`scanText`
+    bakıyor), bu yüzden base64'lenmiş AWS anahtarının ortasına sıfır genişlikli karakter, yumuşak tire ya da varyasyon
+    seçici koymak `encodedDlp`'yi atlatıyordu; denenen 10 karakterin hepsi geçiyordu. Düzeltme: `decodeEmbedded` metni
+    bir de `stripInvisible`'dan geçirip yeniden geziyor (ham metin önce: tag karakterleri ve varyasyon seçiciler kendi
+    başına bir kodlama); aynı kök neden ML ve regex taramasındaki `withDecoded`'ı da kapatıyor. (1b) KISMEN: Gemini'nin
+    taint örneği yanlış okumaydı (`words()` sözcüklere bölmeden önce `\p{M}` işaretlerini siliyor, örnek zaten
+    yakalanıyordu), ama iki dar delik gerçekti: base64'ün içine varyasyon seçici ve camelCase boğumuna varyasyon seçici
+    (`unwrap` yalnızca `\p{Cf}` siliyordu, varyasyon seçici `Mn`). `unwrap` artık `stripInvisible` da uyguluyor.
+    (2) DOĞRU, ama Gemini'nin önerdiği düzeltme yetmezdi: `extractText`/`extractMlText` protokol düzeyinde `_meta`'yı,
+    `type: image|audio` nesnesini bütünüyle ve `blob` anahtarını atlıyordu; en kolay yol da istemciden bağımsızdı:
+    `structuredContent` içinde `blob` ya da `_meta` adlı bir alan. `stripHiddenChars` da image nesnesini bütün
+    döndürdüğü için "ön koşulu kaldır" önerisi image yan alanındaki ANSI'yi yine silmezdi. Düzeltme: iletinin modele
+    gösterdiği şey için `extractMessageText` (`extractMlText` de bu kipte): `_meta` ve medya bloğunun yan alanları
+    okunuyor; `data`/`blob` yalnızca uzun bir base64 koşusuysa ve alan bir yük taşıyorsa (`isPayload`) ikili sayılıp
+    atlanıyor, okunur metne çözülen yük metin olarak okunuyor. Araç TANIMLARI eskisi gibi `_meta`'yı ve medyayı dışarıda
+    bırakıyor (simgeler ve arayüz üst verisi orada). `applyHiddenText` ön koşulu `containsHiddenChars(value)` oldu.
+    Aynı kök neden `encodedDlp`'de, `prompts/get` taramasında ve taint'in sink argümanlarında da vardı; üçü de
+    `extractMessageText`'e geçti. (3) DOĞRU, ama batch gerekmiyordu: sunucu kodu kontrolü yalnızca el sıkışma yanıtında
+    çalışıyordu; yanıttan önce gelen `elicitation`/`sampling` isteği (tek satır, iki satır ya da batch) istemciye
+    geçiyordu, yanıt hiç gelmezse ya da istemci el sıkışmadan başlamazsa kontrol hiç çalışmıyordu. Düzeltme: kontrol
+    sunucunun söylediği ilk mesajda çalışıyor (türü fark etmez; npx o zamana kadar kurulmuş oluyor), engellenirse o
+    mesaj düşüyor ve bekleyen tüm istekler hata ile yanıtlanıyor (`refuseAll`). Batch'in parçalanarak iletilmesi
+    güvenlik değil uyumluluk konusu, değiştirilmedi. Ölçülmedi: ML yanlış alarm oranı (`_meta` ve medya yan alanları
+    artık okunuyor; AEB ve BIPIA yeniden koşulmadı) ve Gemini'ye gitmeyen `gateway.ts` ile `sandbox.ts`. Dosyalar:
+    `decode.ts`, `engine.ts`, `taint.ts`, `ml/classifier.ts`, `proxy.ts`, README ve `docs/tehdit-kapsami.md` sunucu
+    kodu satırları. Commit yok.

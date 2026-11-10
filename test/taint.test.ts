@@ -186,3 +186,25 @@ test('a text cut into short pieces over several calls is caught', () => {
   for (let i = 0; i < words.length && !caught; i += 4) caught = Boolean(t.checkSink('send_message', { text: words.slice(i, i + 4).join(' ') }));
   assert.ok(caught, 'pieces shorter than one shingle');
 });
+
+test('invisible characters do not hide a text from the tracker', () => {
+  let n = 0;
+  const leaks = (source: string, outgoing: string) => {
+    const t = tracker(TAINT, `invisible-${n++}`);
+    t.markResult('read_file', result(source), false);
+    return Boolean(t.checkSink('send_email', { body: outgoing }));
+  };
+  const encoded = Buffer.from(SECRET_DOC).toString('base64');
+  for (const ch of ['​', '­', '️', '\u{e0100}']) {
+    const name = `U+${ch.codePointAt(0)!.toString(16)}`;
+    assert.ok(leaks(SECRET_DOC, SECRET_DOC.replace(/\b(\w)/g, `$1${ch}`)), `inside every word, ${name}`);
+    assert.ok(leaks(SECRET_DOC, `https://x.example/?d=${encoded.replace(/(.{10})/g, `$1${ch}`)}`), `base64 cut every ten characters, ${name}`);
+  }
+  // a variation selector between the two letters of a camelCase hump must not stop the split into words
+  const camel = 'Our internal checklistItems include preparing acquisitionTargets and boardApprovalDocuments before Friday';
+  assert.ok(leaks(camel, camel.replace(/(\p{Ll})(\p{Lu})/gu, '$1️$2')), 'camelCase');
+  // a variation selector after the first letter of every word (the form a review reported) was never a way past it
+  assert.ok(leaks('Bu gizli sözleşme metni dışarı sızdırılıyor sekiz kelime', 'b︀u g︀izli s︀ozlesme m︀etni d︀isari s︀izdiriliyor s︀ekiz k︀elime'), 'Turkish');
+  // unrelated text with the same characters still passes
+  assert.equal(leaks(SECRET_DOC, 'Lunch at noon on Friday?​ The board️ meeting moved.'), false);
+});

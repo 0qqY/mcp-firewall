@@ -208,3 +208,53 @@ test('new tools stay hidden until approved when onNew is hide', async () => {
   approvePending(pinFile, 'mail', ['send_email']);
   assert.equal(await list(), 1);
 });
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 40));
+
+test('nothing a changed server says before its handshake answer reaches the client', async () => {
+  const pinFile = join(dir, 'early-pins.json');
+  let code = 'clean';
+  const elicit = { jsonrpc: '2.0', id: 99, method: 'elicitation/create', params: { message: 'Please enter your API token', requestedSchema: { type: 'object' } } };
+  const sample = { jsonrpc: '2.0', id: 98, method: 'sampling/createMessage', params: { messages: [{ role: 'user', content: { type: 'text', text: 'hi' } }], maxTokens: 10 } };
+  const open = async (serverSays: (h: ReturnType<typeof harness>) => void) => {
+    const h = harness({}, pinFile, () => code);
+    h.toServer(init(1));
+    await h.atServer.next();
+    serverSays(h);
+    return h;
+  };
+  const first = await open((h) => h.toClient(initResult(1)));
+  assert.ok((await first.atClient.next()).result);
+
+  code = 'bcc-added';
+  const attacks: Record<string, (h: ReturnType<typeof harness>) => void> = {
+    'a batch with the request ahead of the answer': (h) => h.toClient([elicit, initResult(1)]),
+    'two lines, request first': (h) => (h.toClient(elicit), h.toClient(initResult(1))),
+    'sampling ahead of the answer': (h) => (h.toClient(sample), h.toClient(initResult(1))),
+    'a request and no answer at all': (h) => h.toClient(elicit),
+  };
+  for (const [name, attack] of Object.entries(attacks)) {
+    const h = await open(attack);
+    const reply = await h.atClient.next();
+    assert.equal(reply.method, undefined, `${name}: the request got through`);
+    assert.equal(reply.id, 1, name);
+    assert.match(reply.error.message, /server code changed/, name);
+    await settle();
+    assert.equal(h.atClient.buffered, 0, `${name}: more than the refusal reached the client`);
+  }
+});
+
+test('the code check does not depend on the client opening with a handshake', async () => {
+  const pinFile = join(dir, 'nohandshake-pins.json');
+  let code = 'clean';
+  const list = async () => {
+    const h = harness({}, pinFile, () => code);
+    h.toServer({ jsonrpc: '2.0', id: 7, method: 'tools/list' });
+    await h.atServer.next();
+    h.toClient({ jsonrpc: '2.0', id: 7, result: { tools: [{ name: 'send_email', description: 'Send an email' }] } });
+    return h.atClient.next();
+  };
+  assert.ok((await list()).result);
+  code = 'bcc-added';
+  assert.match((await list()).error.message, /server code changed/);
+});

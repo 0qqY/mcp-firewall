@@ -1,4 +1,4 @@
-import { mixesLookAlikes, opaqueBlobs, withDecoded } from './decode.js';
+import { isPayload, mixesLookAlikes, opaqueBlobs, withDecoded } from './decode.js';
 import { isObject, type JsonObject } from './jsonrpc.js';
 import { checkPaths } from './paths.js';
 import type { Policy, ToolRule } from './policy.js';
@@ -25,7 +25,22 @@ const HIDDEN_CHARS = new RegExp(HIDDEN_SOURCE, 'u');
 
 export const hasHiddenChars = (text: string): boolean => HIDDEN_CHARS.test(text);
 
-/** Removes hidden characters and escape sequences from every string in a JSON value; counts removals. */
+/**
+ * True when a string anywhere in a JSON value holds hidden characters or escape sequences. Base64 payloads (an
+ * image's `data`, a `blob`) are passed over: nothing hides in them, and they can be megabytes. Every other field
+ * counts, `_meta` and the side fields of a media block included.
+ */
+export function containsHiddenChars(v: unknown): boolean {
+  const walk = (x: unknown): boolean => {
+    if (typeof x === 'string') return HIDDEN_CHARS.test(x);
+    if (Array.isArray(x)) return x.some(walk);
+    if (isObject(x)) return Object.entries(x).some(([k, y]) => !(typeof y === 'string' && isPayload(x, k, y)) && walk(y));
+    return false;
+  };
+  return walk(v);
+}
+
+/** Removes hidden characters and escape sequences from every string in a JSON value (payloads aside, as above); counts removals. */
 export function stripHiddenChars(v: unknown): { value: unknown; removed: number } {
   let removed = 0;
   const re = new RegExp(HIDDEN_SOURCE, 'gu');
@@ -33,8 +48,7 @@ export function stripHiddenChars(v: unknown): { value: unknown; removed: number 
     if (typeof x === 'string') return x.replace(re, () => (removed++, ''));
     if (Array.isArray(x)) return x.map(walk);
     if (isObject(x)) {
-      if ((x.type === 'image' || x.type === 'audio') && typeof x.data === 'string') return x;
-      return Object.fromEntries(Object.entries(x).map(([k, y]) => [k, walk(y)]));
+      return Object.fromEntries(Object.entries(x).map(([k, y]) => [k, typeof y === 'string' && isPayload(x, k, y) ? y : walk(y)]));
     }
     return x;
   };

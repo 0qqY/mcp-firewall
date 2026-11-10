@@ -1,3 +1,4 @@
+import { isPayload, payloadText } from '../decode.js';
 import { isObject } from '../jsonrpc.js';
 
 /** A prompt-injection model. Implementations must return one probability per input, in order. */
@@ -97,7 +98,12 @@ function parseContainer(text: string): unknown {
   }
 }
 
-function collectText(value: unknown, readJson: boolean): string {
+/**
+ * `message` is for what a message puts in front of the model (a result, an error, a prompt, a server request, the
+ * arguments of a call): there every field counts, whatever it is called. A definition keeps `_meta` and media blocks
+ * out of its text, because icons and UI metadata sit there.
+ */
+function collectText(value: unknown, readJson: boolean, message: boolean): string {
   const parts = new Set<string>();
   // `inData`: inside JSON a string held, where the protocol's binary and `_meta` fields mean nothing.
   const walk = (v: unknown, inData: boolean): void => {
@@ -107,9 +113,20 @@ function collectText(value: unknown, readJson: boolean): string {
       else walk(data, true);
     } else if (Array.isArray(v)) v.forEach((x) => walk(x, inData));
     else if (isObject(v)) {
-      if (!inData && (v.type === 'image' || v.type === 'audio')) return;
+      const media = v.type === 'image' || v.type === 'audio';
+      if (!inData && !message && media) return;
       for (const [key, x] of Object.entries(v)) {
-        if (!inData && (key === 'blob' || key === '_meta')) continue;
+        if (!inData && !message && (key === 'blob' || key === '_meta')) continue;
+        if (!inData && message) {
+          // A binary payload has nothing to read; one that decodes to text is read as the text it is.
+          if (typeof x === 'string' && isPayload(v, key, x)) {
+            const text = payloadText(x);
+            if (text) parts.add(text);
+            continue;
+          }
+          // What a media block is, not what it says.
+          if (media && (key === 'type' || key === 'mimeType')) continue;
+        }
         if (readJson && !FIELD_NAME.test(key)) parts.add(key);
         walk(x, inData);
       }
@@ -121,7 +138,16 @@ function collectText(value: unknown, readJson: boolean): string {
 
 /** Collects the human-readable text of a JSON value, skipping binary payloads and duplicates. */
 export function extractText(value: unknown): string {
-  return collectText(value, false);
+  return collectText(value, false, false);
+}
+
+/**
+ * Like extractText, for what a message puts in front of the model: `_meta`, the side fields of a media block and a
+ * blob that is text count too; only binary payloads are skipped. (A client may hand the model more than the
+ * `content` it is meant to, and a field called `blob` or `_meta` is no proof of binary data.)
+ */
+export function extractMessageText(value: unknown): string {
+  return collectText(value, false, true);
 }
 
 /**
@@ -131,5 +157,5 @@ export function extractText(value: unknown): string {
  * metadata. Neighbouring values stay on adjacent lines, so text split across fields is read together.
  */
 export function extractMlText(value: unknown): string {
-  return collectText(value, true);
+  return collectText(value, true, true);
 }

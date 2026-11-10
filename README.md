@@ -27,7 +27,7 @@ Host ──HTTP───► mcp-firewall gateway ──HTTPS──► Uzak MCP s
 | Zehirli prompt şablonu | `prompts/get` sonucu tanım desenleri ve gizli karakter kontrolünden geçer, eşleşen reddedilir; ML bulgusu varsayılan olarak yalnızca uyarıdır (`ml.scan.promptResults`) |
 | Rug pull | `pinning`: tool tanımlarının SHA-256 hash'i (TOFU), değişen tanım gizlenir; çıktı şeması ayrı hash'lendiği için pin her MCP sürümünde tutar |
 | Prompt şablonu rug pull'u | `pinning.prompts`: şablon, argüman değerleri çıkarılarak hash'lenir; onaydan sonra değişen şablon reddedilir |
-| Paket rug pull'u (postmark-mcp) | `pinning.serverCode`: npx paketinin / yerel script'in dosyaları hash'lenir; kod değişince sunucu el sıkışmada (`initialize` / `server/discover`) kesilir. `sandbox` açıkken hash'lenen şey image'ın içerik kimliğidir |
+| Paket rug pull'u (postmark-mcp) | `pinning.serverCode`: npx paketinin / yerel script'in dosyaları hash'lenir; kod değişince sunucu söylediği ilk mesajda (çoğu zaman `initialize` / `server/discover` yanıtı) kesilir. `sandbox` açıkken hash'lenen şey image'ın içerik kimliğidir |
 | Sunucu sürecinin kendi dosya ve ağ erişimi | `sandbox`: sunucu kilitli bir Docker konteynerinde çalışır (ağ yok, salt okunur kök, yetkisiz, root değil, kaynak sınırı, dar klasör bağlama). Docker'ın yalıtımıdır; ağ açıkken sunucunun kendi bağlantısı yine görünmez |
 | İlk günden zehirli / sonradan eklenen tool | `pinning.onNew: hide`: yeni tool onaylanana kadar gizli |
 | Sunucular arası tool gölgeleme | `pinning.onNameCollision`: başka sunucunun da sunduğu tool adı uyarılır veya gizlenir |
@@ -245,8 +245,10 @@ saklayan eski pinler, aynı tanım görüldüğünde kendiliğinden yeni biçime
   (yalnızca o paket; bağımlılıklar, `.pyc` ve başlatıcılar hariç). Paket uv önbelleğinde (`archive-v0`),
   `uv tool` dizininde, pipx `venvs` ve önbellek dizinlerinde aranır; `UV_CACHE_DIR`, `UV_TOOL_DIR`, `PIPX_HOME` dikkate alınır;
 - komut satırındaki yerel script'lerin paketi (`package.json`/`pyproject.toml` olan en yakın dizin);
-  `node_modules`, `.git`, `.venv` atlanır. Hash, sunucu el sıkışmaya (`initialize` veya `server/discover`) ilk cevap
-verdiğinde (npx kurulumu bittikten sonra) alınır. Kod değiştiyse istemciye hata döner ve o oturumda sunucuya hiçbir mesaj iletilmez. Sürümü sabitlenmemiş paketler
+  `node_modules`, `.git`, `.venv` atlanır. Hash, sunucunun gönderdiği ilk mesajda (çoğu zaman `initialize` veya
+`server/discover` yanıtı; npx kurulumu bittikten sonra) alınır: ilk mesaj bir istek de olsa, el sıkışma yanıtı hiç
+gelmese de. Kod değiştiyse o mesaj dahil sunucudan hiçbir şey istemciye geçmez, bekleyen istekler hata ile yanıtlanır
+ve o oturumda sunucuya hiçbir mesaj iletilmez. Sürümü sabitlenmemiş paketler
 (`npx -y paket` gibi) için uyarı yazılır: güncellemeler incelenmeden kurulur. Otomatik bulunamayan sunucular
 (ör. doğrudan PATH'ten çalışan kurulu araçlar, derlenmiş ikili dosyalar, `python -m paket`) için `--code <yol>` ile
 kod dizini verilebilir.

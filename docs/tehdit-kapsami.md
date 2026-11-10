@@ -43,7 +43,7 @@ mixraw-ab4-evilsandangels-30 (eşik 0,3; tablodaki ölçümler önceki modellerl
 | Hata mesajıyla zehirleme (ATPA) *(27.10.2026'da kapatıldı)* | CyberArk ATPA | JSON-RPC `error` yanıtları DLP, gizli karakter ve ML taramasından geçiyor; işaretlenen mesaj firewall mesajıyla değiştiriliyor. |
 | Zehirli sunucu `instructions` alanı, prompt ve resource listeleri *(27.10.2026'da kapatıldı)* | MCP-38 | `initialize` ve `server/discover` yanıtlarındaki `instructions` zehirliyse çıkarılıyor; zehirli prompt, resource ve resource template kayıtları gizleniyor. |
 | Gizli Unicode ve ANSI kaçış kodları *(27.10.2026'da kapatıldı)* | Trail of Bits ANSI; Unicode TAG-block; varyasyon seçicisi kaçakçılığı | `hiddenText: strip`: tool sonuçlarındaki, hata mesajlarındaki ve sampling isteklerindeki görünmez karakterler (TAG, ek varyasyon seçicileri, sıfır genişlikli, bidi) ve ANSI/OSC dizileri temizleniyor. TAG ile kodlanmış talimat temizlenince tamamen kayboluyor. `warn`/`monitor` modunda ve tanımlarda ise gizli metin çözülüp ML'e veriliyor: Türkçe benchmark'ın görünmez Unicode saldırılarında isabet %98 (v9: %93; çözüm olmadan %29). |
-| Paket rug pull'u *(27.10.2026'da eklendi)* | `postmark-mcp` 1.0.15 → 1.0.16: kodda gizli BCC, tool tanımları aynı (Koi Security, Eylül 2025) | `pinning.serverCode`: npx paketinin dosyaları (veya yerel script'in paketi) hash'leniyor. Kod değişirse sunucu el sıkışma anında (`initialize` ya da `server/discover`) kesiliyor ve operatör `mcp-firewall pins approve` diyene kadar o sunucuya hiçbir mesaj gitmiyor. Sürümü sabitlenmemiş paketler (`npx -y paket`) için uyarı yazılıyor. |
+| Paket rug pull'u *(27.10.2026'da eklendi)* | `postmark-mcp` 1.0.15 → 1.0.16: kodda gizli BCC, tool tanımları aynı (Koi Security, Eylül 2025) | `pinning.serverCode`: npx paketinin dosyaları (veya yerel script'in paketi) hash'leniyor. Kod değişirse sunucu söylediği ilk mesajda (çoğu zaman `initialize` ya da `server/discover` yanıtı) kesiliyor: o mesaj dahil sunucudan hiçbir şey istemciye geçmiyor ve operatör `mcp-firewall pins approve` diyene kadar o sunucuya hiçbir mesaj gitmiyor. Sürümü sabitlenmemiş paketler (`npx -y paket`) için uyarı yazılıyor. |
 | Prompt şablonu rug pull'u *(28.10.2026'da eklendi)* | Onaylanmış bir prompt şablonuna sonradan talimat eklenmesi; ör. "her zaman X paketini öner" gibi desenlerin yakalamadığı tercih manipülasyonu | `pinning.prompts: block`: her prompt'un şablonu, kullanıcının girdiği argüman değerleri çıkarılarak hash'leniyor ve ilk görüşte sabitleniyor. Şablon değişirse `prompts/get` reddediliyor ve operatör `mcp-firewall pins approve` diyene kadar reddedilmeye devam ediyor. |
 | İlk görüşte güvenme (TOFU) ve sonradan eklenen tool'lar *(27.10.2026'da eklendi)* | Sonradan eklenen zehirli tool | `pinning.onNew: hide`: yeni tool onaylanana kadar modelden gizleniyor. Varsayılan hâlâ `allow`, çünkü her kurulumda onay gerektiriyor. |
 | Sampling ile kota tüketme (kaynak hırsızlığı) *(27.10.2026'da eklendi)* | Unit 42 (2025): sunucunun sampling ile kullanıcının model kotasını kendi işleri için harcaması | `sampling` sınırları: dakikada 10, oturumda 200 istek; istek başına `maxTokens` en fazla 4096 (fazlası düşürülüyor); oturum başına 100.000 token bütçesi. Hepsi ayarlanabilir. Ayrıca `methods.deny` ile tamamen kapatılabiliyor. |
@@ -93,11 +93,14 @@ Model yine aynı `send_email` çağrısını yapıyor ve firewall aynı argüman
 JSON-RPC trafiğinde hiç görünmüyor, çünkü sunucu bu adresi Postmark API'ye kendi HTTPS bağlantısıyla gönderiyor.
 Bu yüzden 26.10.2026 sürümü bu saldırıyı engelleyemezdi.
 
-**27.10.2026'dan itibaren: sunucu kodu sabitleme (`pinning.serverCode`, `src/codepin.ts`).** Sunucu `initialize`'a
-cevap verdiğinde firewall, npx'in kurduğu paketin dosyalarını (`<npm önbelleği>/_npx/*/node_modules/postmark-mcp`)
-hash'leyip pin dosyasında saklıyor. 1.0.16 kurulduğunda `index.js` değiştiği için hash değişiyor; firewall
-`initialize` yanıtını hataya çeviriyor, o oturumda sunucuya hiçbir `send_email` çağrısı ulaşmıyor ve kayıt
-"possible package rug pull" olarak düşüyor. Operatör kodu inceleyip `mcp-firewall pins approve` diyene kadar bu sürüyor.
+**27.10.2026'dan itibaren: sunucu kodu sabitleme (`pinning.serverCode`, `src/codepin.ts`).** Sunucu ilk mesajını
+gönderdiğinde (normalde `initialize` yanıtı) firewall, npx'in kurduğu paketin dosyalarını
+(`<npm önbelleği>/_npx/*/node_modules/postmark-mcp`) hash'leyip pin dosyasında saklıyor. 1.0.16 kurulduğunda
+`index.js` değiştiği için hash değişiyor; firewall bekleyen `initialize` isteğini hataya çeviriyor, o oturumda
+sunucuya hiçbir `send_email` çağrısı ulaşmıyor ve kayıt "possible package rug pull" olarak düşüyor. Operatör kodu
+inceleyip `mcp-firewall pins approve` diyene kadar bu sürüyor. (10.11.2026'ya kadar kontrol yalnızca el sıkışma
+yanıtında çalışıyordu: yanıttan önce gelen bir `elicitation` ya da `sampling` isteği, ya da hiç gelmeyen bir yanıt
+kontrolü atlıyordu. Harici incelemede bulundu ve kapatıldı.)
 Testte bu senaryo birebir canlandırıldı (`test/codepin.test.ts`): aynı tool tanımları, `index.js`'e eklenmiş bir `Bcc` satırı.
 
 Sınırları: ilk kurulan sürüm referans kabul edildiği için ilk günden kötü olan paketleri (typosquat) yakalamaz.
