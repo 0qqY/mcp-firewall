@@ -701,7 +701,12 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     geçiyordu, yanıt hiç gelmezse ya da istemci el sıkışmadan başlamazsa kontrol hiç çalışmıyordu. Düzeltme: kontrol
     sunucunun söylediği ilk mesajda çalışıyor (türü fark etmez; npx o zamana kadar kurulmuş oluyor), engellenirse o
     mesaj düşüyor ve bekleyen tüm istekler hata ile yanıtlanıyor (`refuseAll`). Batch'in parçalanarak iletilmesi
-    güvenlik değil uyumluluk konusu, değiştirilmedi. Ölçülmedi: ML yanlış alarm oranı (`_meta` ve medya yan alanları
-    artık okunuyor; AEB ve BIPIA yeniden koşulmadı) ve Gemini'ye gitmeyen `gateway.ts` ile `sandbox.ts`. Dosyalar:
+    güvenlik değil uyumluluk konusu, değiştirilmedi. Ölçüm (aynı gün, 35a1ce5 derlemesi): AEB'nin dört profili yeniden
+    koşuldu, 87 vakanın hiçbirinin sonucu dünkü koşuyla değişmedi (katı engelleme 19/62, 23/62, 35/62, 42/62; yeni yanlış
+    engel yok). AEB'de `_meta`, medya yan alanı ya da metin blob'u taşıyan sonuç olmadığı için bu davranış ayrıca A/B ile
+    ölçüldü (gerçek model, kurulu politikanın kopyası, sahte sunucu): zararsız 12 biçimden hiçbiri engellenmedi ya da
+    değiştirilmedi, eskiden geçen 4 saldırı biçimi artık engelleniyor (sentetik, küçük örneklem). BIPIA'nın 6000
+    satırında ürün metni ve 1500'lük pencereler eski derlemeyle birebir aynı, yani skorlar değişmez. Ölçülmedi:
+    Gemini'ye gitmeyen `gateway.ts` ile `sandbox.ts`. Dosyalar:
     `decode.ts`, `engine.ts`, `taint.ts`, `ml/classifier.ts`, `proxy.ts`, README ve `docs/tehdit-kapsami.md` sunucu
     kodu satırları. Commit yok.
