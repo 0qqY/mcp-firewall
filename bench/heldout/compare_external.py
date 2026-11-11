@@ -22,7 +22,7 @@ rows = [json.loads(l) for l in open(args.rows, encoding="utf-8") if l.strip()]
 groups = defaultdict(list)
 for r in rows:
     groups[(r.get(args.by) or "-", r["label"])].append(r["id"])
-keys = sorted(groups)
+keys = sorted(groups, key=str)
 
 
 def pct(ids: list[str], score: dict, thr: float) -> str:

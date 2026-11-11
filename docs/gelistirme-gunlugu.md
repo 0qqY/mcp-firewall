@@ -844,3 +844,30 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     percent regex'i 128.000 karakterde 27 ms. Düzeltmeden sonra shapes taramasında 12.000 karakterde 40 ms'yi aşan
     yalnız bu iki regex'in eski hâli. 3 yeni test, 247/247. Kurulu kopya yenilenmedi: üç ReDoS düzeltmesi de (96 ve bu
     ikisi) yalnız repoda. Dosyalar: `src/decode.ts`, `test/decode.test.ts`, `scripts/redos-{collect,audit,shapes}.mjs`.
+
+99. **Boşluk verisiyle eğitim: `gap` adayları, rakip modeller ve sandbox'ın yeniden denenmesi (11.11.2026):** 96'da
+    held-out sette görünen zayıflıklar (zincirleme eylem, Türkçe dolaylı mail talimatı, prompt channel'ında false alarm)
+    için `training/gap_data.py` ile bağımsız yazılmış 2.120 eğitim satırı ve default modelin 0,3'ün altında skorladığı
+    2.000 gerçek tool tanımı (benign) eklendi. İki tarif denendi: `gapcont` (ham evilsandangels modelinden 2 epoch'luk
+    devam; boşluk + gerçek tool + 12.000 satır replay, 16.120 satır) ve `gap` (mmBERT tabanından tam eğitim, v12eva +
+    boşluk + gerçek tool = 72.950 satır, 2 saat 12 dk); ikisi de `soup04-ab4` ile karıştırıldı. Sonuç (eşik 0,3;
+    tablolar `bench/heldout/adaylar/*.md`):
+    held-out recall / FPR / AUC: B30 95,3 / 12,6 / 0,977; `gapcont-50` 96,7 / 8,2 / 0,988; `gap-30` 94,7 / 9,3 / 0,987;
+    `gap-40` 95,3 / 7,7 / 0,991; `gap-50` 97,3 / 4,4 / 0,994. Türkçe false-alarm seti (2.875 benign): 11,0 → 10,4 / 7,4 /
+    6,3 / 5,6. Gerçek tool tanımı (3.000): %1,0 → %0,4-0,5. 17 standart kümenin toplamı (recall / FPR): B30 83,7 / 11,1;
+    `gap-30` 84,9 / 11,2; `gap-40` 84,0 / 10,3; `gapcont-50` 80,1 / 9,2; `gapcont-30` 84,0 / 10,9. `gapcont-50` aday
+    değil: bağımsız kümede recall 91,2 → 80,4, obfuscated'da 95,3 → 87,2, çok dilli kümede 95,8 → 90,1. `gap-40`
+    B30'la aynı toplam recall'da FPR'yi çoğu kümede düşürüyor (rt 4,9 → 3,7; tr 7,4 → 5,2; eva 11,0 → 6,5 ve recall
+    90,4 → 100; panel etiketleri 45,2 → 22,6; boundary recall 74,0 → 84,2), bedeli: tr recall 91,5 → 89,3, wtr 73,3 →
+    71,9, hfho FPR 9,2 → 13,3. `gap-50` standart kümelerde ölçülmedi. Sınırlar: boşluk verisi held-out'taki zayıflıklara
+    bakılarak yazıldı (satırlar bağımsız, 7 kelimelik ortak dizi taşıyanlar atıldı), yani held-out artık bu adaylar için
+    bir dev seti gibi; karar standart kümelerle verilmeli. Eşit FPR'de karşılaştırma yapılmadı. gap-dev'de (görülmemiş
+    şablon aileleri) `gap_def_plain` recall'u karışımlarda %50'de kaldı (ham `gap` %100): tanım channel'ındaki düz
+    talimatlar karışımda kayboluyor. Default model DEĞİŞMEDİ (B30); öneri `gap-40`, karar kullanıcıda.
+    Rakipler, held-out v1, her model kendi eşiğinde (`bench/heldout/rakip/karsilastirma.md`): B30 95,3 / 12,6 / AUC 0,977;
+    ProtectAI v2 60,7 / 18,6 / 0,792; Prompt Guard 2 86M 22,0 / 1,6 / 0,855; TestSavant 88,7 / 33,9 / 0,840; deepset
+    100 / 98,9; Arch-Guard 44,0 / 9,8; Qwen3Guard-Gen 0.6B 41,3 / 1,6 / 0,884. Uyarı: seti biz yazdık ve rakipler MCP
+    taşıyıcılarına göre eğitilmedi. Sandbox (90) güncel build'le gerçek Docker 29.8.2'de yeniden denendi: izolasyon
+    (nobody, read-only root, CapEff 0, `network: none`'da ağ yok, ro mount'a yazılamıyor), firewall öldürülünce
+    container 1 sn içinde yok, GitHub MCP image'ı `network none` altında 46 tool listeliyor ve çıkışta container
+    siliniyor. GitHub'a bağlanan test kullanıcının isteğiyle yapılmadı. AEB dört profilde aynı (katı 19/23/35/42 / 62).
