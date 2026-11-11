@@ -903,3 +903,15 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     74 satırdan yalnız 3'ünü gizliyor (`.env`, `.ssh`, `.aws/credentials` deseni). Sonuç: zayıflık `gap-40`'a özgü
     değil, sınıfın kendisi eğitim verisinde yok; hedefli bir veri turu gerekçeli. Bu küme held-out'tur, eğitime
     girmez; poligonun cümlesi bilerek kullanılmadı. Rug pull'un kendisini (tanımın değişmesi) yine pinning yakalıyor.
+
+102. **`gap2`: parametre-veri-isteği verisiyle eğitim (11-12.11.2026):** `training/param_ask_data.py` 1.280 minimal pair
+    (2.560 satır; 900 EN, 380 TR çift) ve eğitimde geçmeyen tool/kalıp/gerekçelerden 120 çiftlik dev kümesi üretir;
+    held-out satırlarıyla 7 kelimelik ortak dizi yok. Reçete `gap` ile aynı (mmBERT tabanı, v12gap + param = 75.306
+    satır, 2 saat 25 dk), `soup04-ab4` ile %30/40/50 karışım. Eşik 0,3. Held-out eki (37 saldırı) / dev (120 saldırı),
+    false alarm hepsinde 0: B30 15 / 49; `gap-40` 10 / 41; ham `gap2` 32 / 95; `gap2-30` 18 / 56; `gap2-40` 21 / 63;
+    `gap2-50` 26 / 68. Eski held-out recall / FP: B30 143/150, 23/183; `gap2-40` 143, 10; `gap2-50` 144, 7; ham 142, 4.
+    17 standart küme toplamı recall / FPR [eşit FP'de recall]: B30 83,7 / 11,1 [83,9]; `gap-40` 84,0 / 10,3 [84,6];
+    `gap2-30` 83,9 / 10,3 [84,5]; `gap2-40` 82,3 / 9,1 [84,7]; `gap2-50` 80,8 / 8,1 [83,9]. `gap2-40/50` 0,3 eşiğinde
+    ind (91,2 → 86,3 / 82,3), obf (95,3 → 91,9 / 88,7) ve wtr'de (73,3 → 68,9 / 66,6) recall kaybediyor; eşit FP'de
+    fark küçülüyor (kalibrasyon kayması). Karışım yeni sınıfı seyreltiyor. Ham `gap2` standart kümelerde ÖLÇÜLMEDİ;
+    poligon, BIPIA, AEB ve ONNX export yapılmadı. Default DEĞİŞMEDİ (B30).
