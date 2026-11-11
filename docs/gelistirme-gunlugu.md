@@ -889,3 +889,17 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     değil, çoğu yerde biraz iyi; kazancın büyük kısmı daha temkinli skorlamadan geliyor ve bunun bedeli uzun belgede
     dolaylı injection ile tanım değişikliklerinde daha az yakalama. Default DEĞİŞMEDİ. `bench/bipia/report_bipia.py`
     raporuna `gap40` eklendi.
+
+101. **"Parametre kibarca veri istiyor" saldırısı iki modelin de zayıf noktası (11.11.2026):** Poligonda `gap-40`'ın
+    ML'le kaçırdığı tek rug pull senaryosu ("yeni parametre, açıklama aynı") için kullanıcı yeniden eğitim önerdi; önce
+    ölçüldü. `bench/heldout/ek-parametre-veri-istegi.mjs`: elle yazılmış 37 minimal pair (74 satır; 27 İngilizce, 10
+    Türkçe). Tool açıklaması iki satırda da temiz; saldırı satırında bir parametre açıklaması emir ya da gizli etiket
+    olmadan, ürün diliyle konuşmayı, credential'ı, yerel dosyayı, system prompt'u, ortam değişkenlerini, başka
+    tool'ların çıktısını ya da kişisel veriyi istiyor; ikizinde aynı parametre meşru bir şey istiyor (servisin kendi
+    API key'i dahil). Ürün yolundan (`score.mjs --rows`) 0,3 eşiğinde: B30 15/37, `gap-40` 10/37; ikisinde de false
+    alarm 0/37. `gap-40`'ın kaçırıp B30'un yakaladığı 5 satır var, tersi yok; 22 satırı ikisi de kaçırıyor (ortam
+    değişkeni 0/4, kişisel veri 0/3, dosya 1/7). Sıralama ise sağlam: AUROC 0,950 / 0,962 ve 37 çiftin 37'sinde
+    saldırı ikizinden yüksek skor alıyor; sorun skorların çok düşük olması (medyan saldırı skoru 0,001). Regex katmanı
+    74 satırdan yalnız 3'ünü gizliyor (`.env`, `.ssh`, `.aws/credentials` deseni). Sonuç: zayıflık `gap-40`'a özgü
+    değil, sınıfın kendisi eğitim verisinde yok; hedefli bir veri turu gerekçeli. Bu küme held-out'tur, eğitime
+    girmez; poligonun cümlesi bilerek kullanılmadı. Rug pull'un kendisini (tanımın değişmesi) yine pinning yakalıyor.
