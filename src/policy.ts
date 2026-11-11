@@ -113,6 +113,17 @@ export interface Policy {
     maxChunks: number;
     /** What to do with text longer than `maxChunks` chunks, whose middle is not scanned. */
     onTruncated: 'block' | 'warn';
+    /** Texts per model call. Small batches keep the buffers (batch × length²) and the padding down. */
+    batchSize: number;
+    /** ONNX threads for one scan; 0 lets the runtime take every core. */
+    threads: number;
+    /** Keep ONNX's memory arena: no faster here, but a process then holds up to 2 GB more after a long scan. */
+    memoryArena: boolean;
+    /** Read the model's weights when a text first needs them, not right after the handshake. */
+    lazyLoad: boolean;
+    /** Remember the scores of definitions, so a server whose definitions did not change needs no model at start-up. */
+    cacheDefinitions: boolean;
+    cacheFile: string;
     scan: {
       toolDefinitions: 'hide' | 'warn' | 'off';
       toolResults: 'block' | 'warn' | 'off';
@@ -476,12 +487,20 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
     throw new PolicyError(`dlp: ${(err as Error).message}`);
   }
 
+  const mlThreads = num(ml.threads, 0, 0, 256, 'ml.threads');
+  const mlBatchSize = num(ml.batchSize, 2, 1, 64, 'ml.batchSize');
+  for (const [value, path] of [[mlThreads, 'ml.threads'], [mlBatchSize, 'ml.batchSize']] as const) {
+    if (!Number.isInteger(value)) throw new PolicyError(`${path}: expected a whole number`);
+  }
+  const mlCacheFile = filePath(ml.cacheFile, 'mcp-firewall-scores.jsonl', baseDir, 'ml.cacheFile');
+
   // The firewall's own files: a sandbox mount must not reach them.
   const stateFiles = [
     filePath(audit.file, 'mcp-firewall-audit.jsonl', baseDir, 'audit.file'),
     filePath(pinning.file, 'mcp-firewall-pins.json', baseDir, 'pinning.file'),
     filePath(taint.dir, 'mcp-firewall-taint', baseDir, 'taint.dir'),
     filePath(ml.model, join('models', 'prompt-injection'), baseDir, 'ml.model'),
+    mlCacheFile,
   ];
 
   const useDefaults = bool(desc.useDefaults, true, 'descriptionScan.useDefaults');
@@ -553,6 +572,12 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
       chunkChars: num(ml.chunkChars, 1500, 100, 100_000, 'ml.chunkChars'),
       maxChunks: num(ml.maxChunks, 32, 1, 10_000, 'ml.maxChunks'),
       onTruncated: oneOf(ml.onTruncated, ['block', 'warn'] as const, 'warn', 'ml.onTruncated'),
+      batchSize: mlBatchSize,
+      threads: mlThreads,
+      memoryArena: bool(ml.memoryArena, false, 'ml.memoryArena'),
+      lazyLoad: bool(ml.lazyLoad, true, 'ml.lazyLoad'),
+      cacheDefinitions: bool(ml.cacheDefinitions, true, 'ml.cacheDefinitions'),
+      cacheFile: mlCacheFile,
       scan: {
         toolDefinitions: oneOf(mlScan.toolDefinitions, ['hide', 'warn', 'off'] as const, 'hide', 'ml.scan.toolDefinitions'),
         toolResults: oneOf(mlScan.toolResults, ['block', 'warn', 'off'] as const, 'block', 'ml.scan.toolResults'),

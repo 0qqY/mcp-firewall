@@ -25,7 +25,7 @@ Host ──HTTP───► mcp-firewall gateway ──HTTPS──► Uzak MCP s
 | Full-schema poisoning | Parametre adları (`readSshKey` → "read ssh key") regex ve ML taramasına dahil |
 | Zehirli sunucu talimatları, prompt/resource listeleri | `initialize` ve `server/discover` (MCP 2026-07-28) yanıtlarındaki `instructions`, `prompts/list`, `resources/list`, `resources/templates/list` taranır; bir `tools/list` yanıtına konan `instructions` da aynı şekilde taranır; zehirli olan çıkarılır |
 | Zehirli prompt şablonu | `prompts/get` sonucu tanım desenleri ve gizli karakter kontrolünden geçer, eşleşen reddedilir; ML bulgusu varsayılan olarak yalnızca uyarıdır (`ml.scan.promptResults`) |
-| Rug pull | `pinning`: tool tanımlarının SHA-256 hash'i (TOFU), değişen tanım gizlenir; çıktı şeması ayrı hash'lendiği için pin her MCP sürümünde tutar |
+| Rug pull | `pinning`: tool tanımlarının SHA-256 hash'i (TOFU), değişen tanım gizlenir, hidden olan (poisoned, changed, pending approval ya da name collision) bir tool'a adıyla gelen `tools/call` da reddedilir; çıktı şeması ayrı hash'lendiği için pin her MCP sürümünde tutar |
 | Prompt şablonu rug pull'u | `pinning.prompts`: şablon, argüman değerleri çıkarılarak hash'lenir; onaydan sonra değişen şablon reddedilir |
 | Paket rug pull'u (postmark-mcp) | `pinning.serverCode`: npx paketinin / yerel script'in dosyaları hash'lenir; kod değişince sunucu söylediği ilk mesajda (çoğu zaman `initialize` / `server/discover` yanıtı) kesilir. `sandbox` açıkken hash'lenen şey image'ın içerik kimliğidir |
 | Sunucu sürecinin kendi dosya ve ağ erişimi | `sandbox`: sunucu kilitli bir Docker konteynerinde çalışır (ağ yok, salt okunur kök, yetkisiz, root değil, kaynak sınırı, dar klasör bağlama). Docker'ın yalıtımıdır; ağ açıkken sunucunun kendi bağlantısı yine görünmez |
@@ -33,7 +33,7 @@ Host ──HTTP───► mcp-firewall gateway ──HTTPS──► Uzak MCP s
 | Sunucular arası tool gölgeleme | `pinning.onNameCollision`: başka sunucunun da sunduğu tool adı uyarılır veya gizlenir |
 | Hata mesajıyla zehirleme (ATPA) | JSON-RPC `error` yanıtları da DLP, gizli karakter ve ML taramasından geçer |
 | Görünmez talimatlar, ANSI ile gizleme | `hiddenText`: sonuç, hata ve sampling içeriğindeki görünmez karakterler ve terminal kaçış kodları temizlenir |
-| Veri sızdırma | `dlp.scanRequests`: argümanlardaki secret/PII maskeleme veya engelleme; görünmez karakterlerle (sıfır genişlikli vb.) bölünmüş anahtarlar da bulunur, komşu alanlara bölünmüş anahtarlar (`access_key` + `key_suffix`) yerinde maskelenemeyeceği için `warn` dışında engellenir |
+| Veri sızdırma | `dlp.scanRequests`: argümanlardaki secret/PII maskeleme veya engelleme; görünmez karakterlerle (sıfır genişlikli vb.) bölünmüş anahtarlar da bulunur, JSON property name (key) olarak taşınanlar da bulunur ve key maskelenir, komşu alanlara bölünmüş anahtarlar (`access_key` + `key_suffix`) yerinde maskelenemeyeceği için `warn` dışında engellenir |
 | Formatsız veri sızdırma (toxic flow) | `taint`: kaynak tool'ların döndürdüğü metnin özetleri oturum boyunca tutulur; bu metni (düz, büyük-küçük harf değişmiş ya da base64'lenmiş) argümanında taşıyan çıkış tool'u engellenir. Aynı istemcinin sunucuları etiketleri paylaşır |
 | Secret/PII'nin modele sızması | `dlp.scanResponses`: tool/resource/prompt sonuçlarında maskeleme; sahte görsel başlığının arkasına konmuş metin sırları (`image`/`audio`/`blob` içinde) engellenir |
 | Server'ın LLM'ini kötüye kullanması | `methods.deny: [sampling/createMessage]`, ya da izin verilirse içerik taraması (`ml.scan.serverRequests`) ve `sampling` sınırları: dakika/oturum başına istek, istek başına `maxTokens` tavanı, oturum token bütçesi |
@@ -425,7 +425,7 @@ node dist/src/cli.js dashboard --policy policy.yaml
   (`Etiketleri indir` → `prepare_data.py --extra-train mcp-firewall-labels.jsonl`).
 - **Eşik altı metinler (`ml.review`):** yalnızca alarmlar etiketlenirse model gerçek trafikten hep "yanlış alarm"
   örneği öğrenir. `ml.review.nearMiss: 0.5` skoru 0,5 ile eşik arasında kalıp geçirilen metni, `sample: 0.05`
-  geçirilen diğer metinlerin %5'ini skoruyla olay kaydına yazar (`info`, engellemez). ML sekmesindeki "Eşik altı"
+  geçirilen diğer metinlerin %5'ini skoruyla olay kaydına yazar (`info`, engellemez); sample için metnin en az 40 karakter olması gerekir (kısa bir error mesajında label'lanacak bir şey yok), near miss her uzunlukta kaydedilir. ML sekmesindeki "Eşik altı"
   listesinde "Zararsız" ya da "Saldırı, kaçırıldı" diye etiketlenir. Metin yalnızca yerel olay kaydına yazılır,
   SIEM'e `audit.siem.excerpt` kapalıyken gitmez. Varsayılan ikisi de 0 (kapalı).
 - **Maskelenen veri:** DLP kaydı (`masked`) sırrın kendisini hiçbir zaman tutmaz; detayda dedektör, JSON
@@ -478,7 +478,7 @@ Mesaj ─► Katman 1: kurallar, DLP, pinning ─► Katman 2: ML (tool tanımla
   sonra değişirse reddedilir (`pinning.prompts`).
 - Uzun metinler örtüşen parçalara bölünür, en yüksek parça skoru kullanılır.
 - Modeli tetikleyen metin yalnızca audit loguna yazılır (`score`, `excerpt`), modele geri gönderilmez.
-- Mesaj sırası her yönde korunur; model hatasında `failMode` (varsayılan `closed`) uygulanır.
+- Mesaj sırası her yönde korunur; model hatasında `failMode` (varsayılan `closed`) uygulanır: `closed` hatayı o channel'ın action'ına göre violation sayar (`block` → block, `warn` → warning log ve mesaj geçer).
 - `Classifier` arayüzü ([src/ml/classifier.ts](src/ml/classifier.ts)) başka modellerin takılmasına izin verir.
 
 ### Varsayılan model: mmBERT mixraw-ab4-evilsandangels-30
@@ -571,6 +571,48 @@ python export_onnx.py --model runs/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30/be
 Ardından politikada `ml.enabled: true` yap. Yalnızca fp32 kullanılır (`ml.dtype: fp32`). Eşik modele bağlıdır:
 varsayılan model için 0.3, öncekiler (mix-ab4-lab-30, soup04-ab4) ve baseline için 0.9. Kodun varsayılanı 0.9'da
 kaldı; politikada `ml.threshold` yazmayan bir kurulum yeni modelle 0.9'da çalışır.
+
+### Bellek ve CPU kullanımı
+İstemci her sunucu için ayrı bir firewall süreci başlatır ve modeli yükleyen her süreç yaklaşık 1,6 GB tutar (fp32
+ağırlıklar). 10.11.2026'da 15 GB RAM'li makinede bir Claude Code oturumunun alt süreçleri (9'u firewall) toplam ~16 GB
+commit tutuyordu; birkaç oturum birlikte açılınca Windows sürekli diske sayfalıyor, makine donuyordu. Bunu `ml:`
+altındaki şu ayarlar küçültür (varsayılanlar bellek bakımından en hafif olandır):
+
+- `lazyLoad`: model, ilk metin ona ihtiyaç duyunca yüklenir; handshake'ten hemen sonra değil. `false` eski davranıştır.
+  Bedeli: bir sunucunun ilk tool sonucu modelin yüklenmesini bekler (10.11.2026'da `git`'te 4,8 sn; bellek tükenmişken
+  `filesystem`'de 19,6 sn). Oturumda hiç çağrılmayan sunucu modeli hiç yüklemez, çağrılan her sunucu yine ~2 GB tutar.
+- `cacheDefinitions`: tool, prompt, resource tanımlarının ve sunucu `instructions`'ının skoru `cacheFile`'a
+  (varsayılan `mcp-firewall-scores.jsonl`) yazılır. Satırda model etiketi, metnin hash'i ve skor var; metin yok. Aynı
+  modelle aynı tanım gelince skor dosyadan okunur ve yine güncel `threshold`'la karşılaştırılır, yani karar modelin
+  vereceğiyle aynıdır. Tanımları değişmemiş bir sunucu açılışta modeli hiç yüklemez; ilk tool sonucu gelince yüklenir
+  (sonuçlar önbelleğe girmez). Model dosyaları, dtype ya da etiket değişirse eski satırlar kullanılmaz. Önbellek boşken
+  (ilk açılış, yeni model, değişen tanım) tanımlar modelle taranır. Tanımları taramayan politikada
+  (`scan.toolDefinitions: off`, kurulu `policy-genel.yaml` ve `policy.yaml` böyle) yazılacak skor yoktur; bellek
+  kazancı orada yalnızca `lazyLoad`'dan gelir. Dosya pin dosyası gibi firewall'ın kendi durum
+  dosyasıdır: yazabilen biri bir tanımı temiz gösterebilir. Sandbox bu dosyayı kapsayan bir mount'u reddeder; sunucuya
+  verdiğin dosya erişimi de (ör. filesystem MCP sunucusu) `~/.mcp-firewall`'ı kapsamamalı.
+- `memoryArena: false` ve `batchSize: 2`: ONNX'in bellek arena'sı her taramanın en büyük buffer'ını geri vermiyordu.
+  Küçük batch hem bu zirveyi hem padding'i düşürür. `memoryArena: true` eski davranıştır.
+- `threads`: tarama başına ONNX thread sayısı. Varsayılan 0 (hepsi). Aynı makinede çok firewall aynı anda tarıyorsa 2-4
+  denenebilir; tarama o oranda yavaşlar (bu ayarın etkisini ölçmedim).
+
+Varsayılan model, tek süreç, 10.11.2026'da bu makinede ölçüldü:
+
+| Ölçüm | Eski | Yeni |
+|---|---|---|
+| Tanımları önbellekte olan, hiç çağrılmayan sunucunun firewall'ı | ~2,0 GB (handshake'ten 4 sn sonra) | 37 MB |
+| Kurulu beş gerçek sunucunun firewall'ı, çağrılmadan (`policy-genel.yaml`, tanımlar kapalı) | 1,4 GB (çalışan eski süreçlerde) | 37–38 MB |
+| Aynı sunucular, bir okuma çağrısından sonra (`git`, `filesystem`) | | 1,7–1,9 GB |
+| `git`, tanım taraması açık (12 gerçek tanım), ikinci oturum | 4,6 sn tarama ve 2,4 GB (önbelleksiz, her oturumda) | 18 ms ve 38 MB |
+| Model yüklüyken, ilk tool sonucundan sonra | 2,5 GB | 2,0–2,5 GB |
+| Modelin tek uzun taramadan (32 parça) sonraki yeri | 3,6 GB | 1,5 GB |
+| 60.000 karakterlik bir tool sonucundan sonra | 4,8 GB | 2,3–2,6 GB |
+| Aynı iş yükünde (76 tanım, 120 sonuç, bir uzun metin) toplam tarama süresi | 54 sn | 53 sn |
+| Token yoğun 60.000 karakterlik sonucun taranması | 55 sn | 70 sn |
+| Held-out v1 (333 satır) skorları | | birebir aynı (en büyük fark 0,00000, eşik 0.3'te değişen satır yok) |
+
+Üç sonuç: önbellek ve tembel yükleme, oturumda çağrılmayan sunucuların bedelini sıfırlar; arena'yı kapatmak
+çağrılan sunucunun tavanını yarıya indirir; token yoğun çok uzun metinlerde tarama daha yavaş (bedel bu).
 
 ### Baseline
 ```bash
@@ -1027,7 +1069,10 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 ## Bilinen sınırlamalar
 - Regex tabanlı argüman denetimi encoding/normalizasyon hilelerine açıktır (ör. `%2e%2e/`, Windows kısa yolları).
   Yol argümanları için `paths` kullanın; `paths` de denetimden sonra değiştirilen bağları (TOCTOU) yakalayamaz.
-- Description taraması kalıp tabanlıdır; yeni ifade biçimlerini kaçırabilir.
+- Description taraması kalıp tabanlıdır; yeni ifade biçimlerini kaçırabilir. `ml.scan.toolDefinitions` kapalıyken (kurulu örnekte
+  böyle) tool tanımlarını yalnızca bu kalıplar ve sabitleme korur: `bench/heldout` setindeki tanım saldırılarının 13/36'sını
+  yakaladılar, ML tanım taraması %97.6 yakalıyor. Kalıplar gerçek bir MCP ekosisteminde (239 bin tanım) tanımların %0.53'ünü
+  gizlerdi, çoğu meşru; ML rastgele 3.000 gerçek tanımın %1.0'ını işaretledi.
 - `ask` onayı istemcinin elicitation desteğine bağlıdır; desteklemeyen istemcide `approval.fallback` uygulanır.
   Kullanıcı her pencereyi okumadan onaylarsa (onay yorgunluğu) koruma zayıflar; `ask`'ı az sayıda tool'a verin.
 - `taint` içerik modu kelimesi kelimesine (ya da kodlanmış/gizlenmiş biçimde) taşınan metni yakalar; özetlenmiş,
@@ -1039,6 +1084,7 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 - `image`/`audio`/`blob` içindeki metin taraması yalnızca DLP kalıplarını okur (ML bakmaz) ve 8 MB'a kadar çözer; tanımdaki
   gömülü ikili içerik denetimi `data` ile `mimeType` ya da `encoding: base64` taşıyan nesneleri tanır.
 - JSON-RPC batch'leri tek tek mesajlar olarak iletilir.
+- Her yönün message queue'su ve pending request table'ı sınırsızdır: yoğun mesaj akıtan bir server kendi bağlantısının belleğini şişirebilir, yanıtlanmayan request'ler oturum boyunca table'da kalır. Aynı JSON-RPC ID yeniden kullanılırsa önceki request'in context'i ezilir (MCP ID'nin yeniden kullanımını yasaklar).
 - `sandbox` Docker'ın yalıtımıdır, VM sınırı değildir. Ağ açıkken (`bridge`) sunucunun kendi bağlantısı görünmez ve adres bazlı
   izin listesi yoktur; bağlanan klasördeki veri sunucuya açıktır. Yalnızca Windows'ta Docker Desktop ile denendi.
 - ML sınıflandırıcısı da bir modeldir: adversarial girdilerle atlatılabilir, bu yüzden tek savunma hattı değildir.

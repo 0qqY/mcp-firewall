@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { decodeEmbedded, deobfuscate, stripInvisible } from './decode.js';
-import { extractMessageText, extractText } from './ml/classifier.js';
+import { extractKeys, extractMessageText, extractText } from './ml/classifier.js';
 
 export interface TaintSource {
   pattern: string;
@@ -195,6 +195,9 @@ export class TaintTracker {
     // Everything the call carries counts, whatever a field is called: `_meta`, a media block's side fields, a text blob.
     const text = extractMessageText(args);
     const sent = fingerprints(text, this.sentTail);
+    // Property names ride as data too (a sentence or a token can be a key). They are fingerprinted on their own, so
+    // field names never enter the word stream that joins text cut into pieces over several calls.
+    for (const h of fingerprints(extractKeys(args))) sent.add(h);
     let best: TaintFlow | undefined;
     for (const mark of live) {
       let matches = 0;

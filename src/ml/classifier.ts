@@ -1,12 +1,20 @@
 import { isPayload, payloadText } from '../decode.js';
 import { isObject } from '../jsonrpc.js';
 
+/**
+ * What the caller knows about a batch of texts. `stable`: the same texts come back session after session (tool,
+ * prompt and resource definitions, server instructions), so a classifier may remember their scores.
+ */
+export interface ScoreHint {
+  stable?: boolean;
+}
+
 /** A prompt-injection model. Implementations must return one probability per input, in order. */
 export interface Classifier {
   readonly name: string;
   /** The model was trained with a channel tag in front of each input (see CHANNEL_TAGS). */
   readonly channelTags?: boolean;
-  injectionScores(texts: string[]): Promise<number[]>;
+  injectionScores(texts: string[], hint?: ScoreHint): Promise<number[]>;
 }
 
 /**
@@ -70,7 +78,8 @@ export async function scoreTexts(classifier: Classifier, texts: string[], opts: 
   });
   if (chunks.length === 0) return results;
 
-  const scores = await classifier.injectionScores(prefix ? chunks.map((c) => prefix + c) : chunks);
+  // Only definitions repeat from one session to the next; a result is seen once.
+  const scores = await classifier.injectionScores(prefix ? chunks.map((c) => prefix + c) : chunks, { stable: channel === 'definition' });
   if (scores.length !== chunks.length) {
     throw new Error(`classifier returned ${scores.length} scores for ${chunks.length} inputs`);
   }
@@ -148,6 +157,22 @@ export function extractText(value: unknown): string {
  */
 export function extractMessageText(value: unknown): string {
   return collectText(value, false, true);
+}
+
+/** Every object key of a JSON value, one per line and without duplicates: a property name carries data like any value. */
+export function extractKeys(value: unknown): string {
+  const keys = new Set<string>();
+  const walk = (v: unknown): void => {
+    if (Array.isArray(v)) v.forEach(walk);
+    else if (isObject(v)) {
+      for (const [key, x] of Object.entries(v)) {
+        keys.add(key);
+        walk(x);
+      }
+    }
+  };
+  walk(value);
+  return [...keys].join('\n');
 }
 
 /**

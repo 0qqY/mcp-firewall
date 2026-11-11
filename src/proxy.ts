@@ -28,7 +28,7 @@ import {
   type JsonRpcId,
   type JsonRpcMessage,
 } from './jsonrpc.js';
-import { extractMessageText, extractMlText, extractText, scoreTexts, type Channel, type Classifier } from './ml/classifier.js';
+import { extractKeys, extractMessageText, extractMlText, extractText, scoreTexts, type Channel, type Classifier } from './ml/classifier.js';
 import { hashPromptTemplate, promptPinKey, type PinStatus, type PinStore } from './pinning.js';
 import type { Policy } from './policy.js';
 import { TaintTracker } from './taint.js';
@@ -67,6 +67,12 @@ const APPROVAL_ID = 'mcp-firewall-approval-';
 /** Characters of each argument value shown in an approval prompt, and how many arguments are listed. */
 const APPROVAL_VALUE_CHARS = 200;
 const APPROVAL_MAX_ARGS = 25;
+/**
+ * A random review sample shorter than this (an error message such as "Invalid request parameters") gives a reviewer nothing
+ * to judge; a near miss is kept at any length, since a short attack that scored just under the threshold is worth labelling.
+ * The dashboard applies the same limit to older records (ui/app.js).
+ */
+const MIN_SAMPLE_CHARS = 40;
 
 /** A client request awaiting its response; `args` are the non-empty `prompts/get` arguments. */
 interface PendingRequest {
@@ -136,6 +142,8 @@ export class FirewallProxy {
   /** Set when the server's code failed its pin check: from then on nothing passes in either direction. */
   private serverBlocked?: string;
   private codeChecked = false;
+  /** Tools the latest tools/list hid, and why: a hidden tool cannot be called by name either (clients cache lists). */
+  private readonly hiddenTools = new Map<string, string>();
   /** The model, from the first loadModel call on. */
   private model?: Promise<Classifier>;
   /** Sampling usage this session: start times of the last minute's requests, request and token totals. */
@@ -157,8 +165,10 @@ export class FirewallProxy {
     private readonly pins: PinStore | undefined,
     private readonly io: ProxyStreams,
     /**
-     * The model, or a loader for it. Loading blocks the event loop for seconds, so the loader is called
-     * once the handshake has been answered, or earlier by the first scan that needs the model.
+     * The model, or a loader for it. Loading the weights blocks the event loop for seconds, so the loader is called
+     * once the handshake has been answered, or earlier by the first scan that needs the model. The CLI's loader hands
+     * back a classifier at once and reads the weights only when a text needs them (`ml.lazyLoad`), so a server whose
+     * definitions did not change never loads them (`ml.cacheDefinitions`).
      */
     private readonly classifier?: Classifier | (() => Promise<Classifier>),
     /** Fingerprints the server's code; called once, when the server first speaks (npx has installed it by then). */
@@ -276,6 +286,15 @@ export class FirewallProxy {
     if (!decision.allowed && this.violation(ctx, decision.reason!)) {
       send(this.io.clientOut, toolErrorResponse(msg.id, decision.reason!));
       return undefined;
+    }
+
+    const hiddenWhy = this.hiddenTools.get(name);
+    if (hiddenWhy !== undefined) {
+      const reason = `tool is hidden from the tool list and cannot be called: ${hiddenWhy}`;
+      if (this.violation(ctx, reason)) {
+        send(this.io.clientOut, toolErrorResponse(msg.id, reason));
+        return undefined;
+      }
     }
 
     const { dlp } = this.policy;
@@ -718,7 +737,8 @@ export class FirewallProxy {
    */
   private encodedDlp(value: unknown, ctx: Context, what: string): { value: unknown; blockReason?: string; found?: boolean } {
     if (!this.policy.decoding.enabled) return { value };
-    const decoded = decodeEmbedded(extractMessageText(value));
+    // Property names too: an encoded secret can ride as a key.
+    const decoded = decodeEmbedded(`${extractMessageText(value)}\n${extractKeys(value)}`);
     if (decoded.length === 0) return { value };
     const { findings } = deepScan(decoded, this.policy.dlp.detectors);
     if (findings.length === 0) return { value };
@@ -760,7 +780,7 @@ export class FirewallProxy {
         }
         const { nearMiss, sample } = ml.review;
         const review = nearMiss > 0 && s.score >= nearMiss ? 'near miss' : sample > 0 && Math.random() < sample ? 'sample' : '';
-        if (review && s.excerpt) {
+        if (review && s.excerpt && (review === 'near miss' || s.excerpt.length >= MIN_SAMPLE_CHARS)) {
           this.audit.record({ ...ctx, verdict: 'info', reason: `ML ${review} for review (score ${s.score.toFixed(3)})`, score: s.score, excerpt: s.excerpt });
         }
         if (s.truncated) {
@@ -875,7 +895,11 @@ export class FirewallProxy {
         else this.audit.record({ ...ctx, verdict: 'warn', reason });
       }
 
-      if (hideReasons.length > 0 && this.violation(ctx, hideReasons.join('; '))) return;
+      if (hideReasons.length > 0 && this.violation(ctx, hideReasons.join('; '))) {
+        this.hiddenTools.set(name, hideReasons.join('; '));
+        return;
+      }
+      this.hiddenTools.delete(name);
       kept.push(tool);
     });
     return { ...result, tools: kept };

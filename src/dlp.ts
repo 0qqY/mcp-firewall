@@ -139,9 +139,20 @@ export function deepScan(value: unknown, detectors: Detector[]): { value: unknow
     if (typeof v === 'string') return scanText(v, detectors, counts, path, masked);
     if (Array.isArray(v)) return v.map((x, i) => walk(x, `${path}[${i}]`));
     if (isObject(v)) {
-      // Base64 image/audio payloads only produce false positives.
-      if ((v.type === 'image' || v.type === 'audio') && typeof v.data === 'string') return v;
-      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, path ? `${path}.${k}` : k)]));
+      // Base64 image/audio payloads only produce false positives; the other fields of a media block are read.
+      const media = v.type === 'image' || v.type === 'audio';
+      // A property name is data too: a secret used as a key must not slip past a scan that reads values only.
+      // Two keys that mask to the same text stay two keys.
+      const used = new Set<string>();
+      return Object.fromEntries(
+        Object.entries(v).map(([k, x]) => {
+          const clean = scanText(k, detectors, counts, path ? `${path}.<key>` : '<key>', masked);
+          let key = clean;
+          if (clean !== k) for (let n = 2; used.has(key); n++) key = `${clean}#${n}`;
+          used.add(key);
+          return [key, media && k === 'data' && typeof x === 'string' ? x : walk(x, path ? `${path}.${k}` : k)];
+        }),
+      );
     }
     return v;
   };

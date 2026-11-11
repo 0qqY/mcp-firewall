@@ -208,3 +208,15 @@ test('invisible characters do not hide a text from the tracker', () => {
   // unrelated text with the same characters still passes
   assert.equal(leaks(SECRET_DOC, 'Lunch at noon on Friday?​ The board️ meeting moved.'), false);
 });
+
+test('a text or a key-like token sent as object keys is caught too', () => {
+  let n = 0;
+  const leaks = (source: string, args: object) => {
+    const t = tracker(TAINT, `keys-${n++}`);
+    t.markResult('read_file', result(source), false);
+    return Boolean(t.checkSink('send_message', args));
+  };
+  assert.ok(leaks(SECRET_DOC, { meta: { [SECRET_DOC]: 1 } }), 'a sentence as a key');
+  assert.ok(leaks('token: zq81kdl02mxp7sw9vb44', { labels: { zq81kdl02mxp7sw9vb44: 'x' } }), 'a token as a key');
+  assert.equal(leaks(SECRET_DOC, { meta: { subject: 'Lunch', body: 'Lunch at noon on Friday?' } }), false, 'field names alone are no flow');
+});

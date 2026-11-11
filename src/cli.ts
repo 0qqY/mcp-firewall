@@ -7,7 +7,9 @@ import { openSinks } from './siem.js';
 import { DesktopNotifier } from './notify.js';
 import { startDashboard } from './dashboard/server.js';
 import type { Classifier } from './ml/classifier.js';
-import { loadTransformersClassifier } from './ml/transformers.js';
+import { lazyClassifier } from './ml/lazy.js';
+import { ScoreCache } from './ml/scorecache.js';
+import { describeModel, loadTransformersClassifier, type ModelInfo } from './ml/transformers.js';
 import { fingerprintServer } from './codepin.js';
 import { Gateway } from './gateway.js';
 import { approvePending, listPending, PinStore } from './pinning.js';
@@ -186,7 +188,12 @@ function openAudit(policy: Policy, serverId: string): AuditLog {
   });
 }
 
-/** The ML loader; memoised, so a gateway with many sessions loads the model once. A model that cannot load stops the firewall. */
+/**
+ * The ML loader; memoised, so a gateway with many sessions loads the model once. A model that cannot load stops the
+ * firewall. The classifier it hands out reads the weights only when a text needs them (`ml.lazyLoad`), and a text
+ * that is a definition seen before is answered from the score cache (`ml.cacheDefinitions`): a client starts one
+ * firewall per server, and each used to hold a gigabyte of weights whether its server was called or not.
+ */
 function classifierLoader(policy: Policy, audit: AuditLog, onFail: () => void): (() => Promise<Classifier>) | undefined {
   if (!policy.ml.enabled) return undefined;
   // A missing model must fail loudly, not degrade silently, and before any server starts.
@@ -195,7 +202,7 @@ function classifierLoader(policy: Policy, audit: AuditLog, onFail: () => void): 
     process.exit(1);
   }
   let loading: Promise<Classifier> | undefined;
-  return () => {
+  const loadWeights = (): Promise<Classifier> => {
     if (loading) return loading;
     const started = Date.now();
     loading = loadTransformersClassifier(policy.ml.model, policy.ml);
@@ -209,6 +216,19 @@ function classifierLoader(policy: Policy, audit: AuditLog, onFail: () => void): 
     );
     return loading;
   };
+  if (!policy.ml.lazyLoad) return loadWeights;
+
+  // The files are checked now, so a broken model still stops the firewall before any server starts.
+  let info: ModelInfo;
+  try {
+    info = describeModel(policy.ml.model, policy.ml);
+  } catch (err) {
+    process.stderr.write(`mcp-firewall: cannot load ML model ${policy.ml.model}: ${(err as Error).message}\n`);
+    process.exit(1);
+  }
+  const cache = policy.ml.cacheDefinitions ? new ScoreCache(policy.ml.cacheFile, info.fingerprint) : undefined;
+  const classifier = lazyClassifier(info, loadWeights, cache);
+  return () => Promise.resolve(classifier);
 }
 
 /** `Name: value` with \${VAR} replaced from the environment; a missing variable is an error, not an empty credential. */

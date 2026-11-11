@@ -166,10 +166,20 @@ ml:
   injectionLabel: INJECTION   # modelin pozitif sınıf etiketi
   threshold: 0.3              # bu skor ve üstü ihlal sayılır. 0.3 varsayılan modele (mixraw-ab4-evilsandangels-30)
                               # göre ayarlı: bu karışımın skorları daha düşük çıkar. Başka modelde (ör. baseline) 0.9 kullan
-  failMode: closed            # closed: model hatası = ihlal | open: uyar ve geçir
+  failMode: closed            # closed: model hatası = ihlal (channel action'ı block ise block, warn ise warning) | open: uyar ve geçir
   chunkChars: 1500            # uzun metinler örtüşen parçalara bölünür
   maxChunks: 32               # fazlası olursa baştan ve sondan taranır
   onTruncated: warn           # ortası taranamayan uzun metin: block | warn (dolgu saldırısına karşı block)
+  # Bellek ve CPU: istemci sunucu başına bir firewall süreci başlatır, modeli yükleyen her süreç ~1,6 GB tutar.
+  lazyLoad: true              # model ilk metin ona ihtiyaç duyunca yüklenir, handshake'ten hemen sonra değil
+  cacheDefinitions: true      # tool/prompt/resource tanımlarının ve instructions'ın skorları hatırlanır: tanımları
+                              # değişmemiş bir sunucu açılışta modeli hiç yüklemez. Dosyada yalnızca hash ve skor var, metin
+                              # yok. Pin dosyası gibi firewall'ın kendi durum dosyasıdır: sunucu ona erişememeli
+  # cacheFile: ./mcp-firewall-scores.jsonl
+  batchSize: 2                # model çağrısı başına metin. Bellek zirvesi batch × uzunluk² ile büyür; ölçümde 2, 8'den yavaş değil
+  memoryArena: false          # true: ONNX'in bellek arena'sı açık kalır. Kapalıyken süreç uzun bir taramadan sonra 2 GB'a kadar
+                              # az bellek tutar; token yoğun çok uzun metinde tarama ~%25'e kadar yavaşlayabilir
+  threads: 0                  # tarama başına ONNX thread sayısı; 0 = hepsi. Aynı makinede çok firewall varsa 2-4 dene
   scan:
     toolDefinitions: hide     # hide | warn | off  (tool/prompt/resource tanımları, sunucu instructions)
     toolResults: block        # block | warn | off  (dolaylı prompt injection; hata mesajları dahil)

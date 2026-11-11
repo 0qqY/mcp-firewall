@@ -148,7 +148,10 @@ const DECODERS: Decoder[] = [
   [/(?:&#(?:x[0-9a-fA-F]+|\d+);){6,}/g, fromEntities],
   [/[\u{E0000}-\u{E01EF}︀-️]{8,}/gu, fromInvisible],
   // Three or more words in one sentence: ROT13 keeps spaces and punctuation, so a hidden sentence stays one run.
-  [/\p{L}[\p{L}']*(?:[ \t,;:"'()-]+\p{L}[\p{L}']*){2,}/gu, fromRot13],
+  // A run starts only at the start of a word and an apostrophe belongs to a word only between two letters: without
+  // these two limits the search restarted inside every long word and tried every split of a row of apostrophes, which
+  // is quadratic (64,000 letters, the size of a base64 blob, took 7 s on the event loop).
+  [/(?<!\p{L})\p{L}+(?:'\p{L}+)*(?:[ \t,;:"'()-]+\p{L}+(?:'\p{L}+)*){2,}/gu, fromRot13],
 ];
 
 // One quoted piece on one line, in straight, curly or back quotes. A single quote right after a letter is an
@@ -231,17 +234,102 @@ const HOMOGLYPHS: Record<string, string> = {
   А: 'A', В: 'B', С: 'C', Е: 'E', Н: 'H', І: 'I', Ј: 'J', К: 'K', М: 'M', О: 'O', Р: 'P', Ѕ: 'S', Т: 'T', Х: 'X', У: 'Y',
   α: 'a', ο: 'o', ν: 'v', ρ: 'p', τ: 't', υ: 'u', ι: 'i', κ: 'k', Α: 'A', Β: 'B', Ε: 'E', Η: 'H', Ι: 'I', Κ: 'K', Μ: 'M', Ν: 'N', Ο: 'O', Ρ: 'P', Τ: 'T', Χ: 'X', Υ: 'Y', Ζ: 'Z',
 };
+// States of `isNamingStyle` (bit flags: the machine tracks every state the word could be in).
+const NS_PREFIX_UPPER = 1; // inside the leading capitals
+const NS_PREFIX_LOWER = 2; // inside the first lowercase run
+const NS_LOOP = 4; // between humps (also where the word may end, or take a final capital and "s")
+const NS_HUMP_A1 = 8; // capital of a "Xyz" hump, needs two lowercase letters
+const NS_HUMP_A2 = 16;
+const NS_HUMP_A3 = 32; // hump complete, may take more lowercase letters
+const NS_HUMP_B1 = 64; // first capital of a "XY" hump
+const NS_HUMP_B2 = 128; // hump complete, may take more capitals
+const NS_TAIL_UPPER = 256; // a final capital
+const NS_TAIL_LOWER = 512; // a final capital and one lowercase letter
+const NS_PLURAL = 1024; // a final "s"
+const NS_ALL_UPPER = 2048; // only capitals so far
+const NS_ALL_UPPER_PLURAL = 4096;
+const NS_ACCEPT = NS_PREFIX_UPPER | NS_PREFIX_LOWER | NS_LOOP | NS_TAIL_UPPER | NS_TAIL_LOWER | NS_PLURAL | NS_ALL_UPPER | NS_ALL_UPPER_PLURAL;
+
 /**
  * lower, UPPER (plural "IDs" too), Title, camelCase, PascalCase, acronyms ("XMLHttpRequest", "ChatGPT", "iPhone").
  * Inner humps need two lowercase letters, otherwise "PrEvIoUs" would pass as PascalCase.
+ *
+ * It is the regular expression `^(?:[A-Z]+s?|[A-Z]*[a-z]*(?:[A-Z][a-z]{2,}|[A-Z]{2,})*(?:[A-Z][a-z]?)?s?)$`, run as a state
+ * machine. As a regex it backtracks exponentially on a long run of capitals with an ending it cannot accept ("Ew" + 125 x
+ * "A" + "Pfw", the start of a base64 string of zero bytes, kept a proxy busy for hours) and the scan runs on the event loop,
+ * so one such word in a tool description or a page would stop every message of that server. This one reads a word once.
  */
-const NAMING_STYLE = /^(?:[A-Z]+s?|[A-Z]*[a-z]*(?:[A-Z][a-z]{2,}|[A-Z]{2,})*(?:[A-Z][a-z]?)?s?)$/;
+export function isNamingStyle(word: string): boolean {
+  let states = NS_PREFIX_UPPER | NS_LOOP;
+  for (let i = 0; i < word.length && states !== 0; i++) {
+    const code = word.charCodeAt(i);
+    const upper = code >= 65 && code <= 90;
+    const lower = code >= 97 && code <= 122;
+    const plural = code === 115; // "s", a lowercase letter that may also close the word
+    let next = i === 0 && upper ? NS_ALL_UPPER : 0; // the first alternative, `[A-Z]+s?`, needs a capital to start
+    if (states & NS_PREFIX_UPPER) next |= upper ? NS_PREFIX_UPPER : lower ? NS_PREFIX_LOWER : 0;
+    if (states & NS_PREFIX_LOWER && lower) next |= NS_PREFIX_LOWER;
+    if (states & NS_LOOP) {
+      if (upper) next |= NS_HUMP_A1 | NS_HUMP_B1 | NS_TAIL_UPPER;
+      if (plural) next |= NS_PLURAL;
+    }
+    if (states & NS_HUMP_A1 && lower) next |= NS_HUMP_A2;
+    if (states & NS_HUMP_A2 && lower) next |= NS_HUMP_A3;
+    if (states & NS_HUMP_A3 && lower) next |= NS_HUMP_A3;
+    if (states & NS_HUMP_B1 && upper) next |= NS_HUMP_B2;
+    if (states & NS_HUMP_B2 && upper) next |= NS_HUMP_B2;
+    if (states & NS_TAIL_UPPER) {
+      if (lower) next |= NS_TAIL_LOWER;
+      if (plural) next |= NS_PLURAL;
+    }
+    if (states & NS_TAIL_LOWER && plural) next |= NS_PLURAL;
+    if (states & NS_ALL_UPPER) {
+      if (upper) next |= NS_ALL_UPPER;
+      else if (plural) next |= NS_ALL_UPPER_PLURAL;
+    }
+    // Leading capitals, the first lowercase run and a finished hump all lead back to the loop.
+    if (next & (NS_PREFIX_UPPER | NS_PREFIX_LOWER | NS_HUMP_A3 | NS_HUMP_B2)) next |= NS_LOOP;
+    states = next;
+  }
+  return (states & NS_ACCEPT) !== 0;
+}
 const LEET_BACK: Record<string, string> ={ '4': 'a', '@': 'a', '3': 'e', '1': 'i', '!': 'i', '0': 'o', '5': 's', $: 's', '7': 't', '9': 'g', '8': 'b' };
 
 /**
  * Undoes character-level obfuscation: look-alike letters, fullwidth forms, "i g n o r e" / "i.g.n.o.r.e"
  * spelling, l33t inside words and rAnDoM casing. Returns the text unchanged when nothing was obfuscated.
  */
+/** `\w` of a regular expression without the `u` flag. */
+const isWordChar = (code: number): boolean =>
+  (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95;
+
+/**
+ * `text.replace(/\S+@\S+\.\w+/g, ' ')` in linear time: an e-mail-like run (something@something.word) is set aside
+ * before l33t words are counted. The regular expression retried every "@" from every start position, which is cubic
+ * on a long run that has "@" but no ".x" (2,000 characters took 1.5 s and 3,000 took 7.7 s, on the event loop).
+ *
+ * Within one run of non-space characters a match, if there is one, starts at the run's first character and ends after
+ * the word that follows the last "." with a word character behind it; it needs an "@" that is not the first character
+ * and sits at least two characters before that ".". What is left of the run has no such "." any more.
+ */
+export function withoutEmailLike(text: string): string {
+  return text.replace(/\S+/g, (run) => {
+    let dot = -1;
+    for (let i = run.length - 2; i >= 3; i--) {
+      if (run.charCodeAt(i) === 46 && isWordChar(run.charCodeAt(i + 1))) {
+        dot = i;
+        break;
+      }
+    }
+    if (dot < 0) return run;
+    const at = run.indexOf('@', 1);
+    if (at < 0 || at > dot - 2) return run;
+    let end = dot + 2;
+    while (end < run.length && isWordChar(run.charCodeAt(end))) end++;
+    return ` ${run.slice(end)}`;
+  });
+}
+
 export function deobfuscate(text: string): string {
   let out = text.normalize('NFKC');
   // Look-alike letters only count inside words that also hold Latin letters (Russian or Greek prose stays as is).
@@ -256,7 +344,7 @@ export function deobfuscate(text: string): string {
   // words), the text is obfuscated as a whole and every word with a letter is mapped back.
   const leety = (w: string) => /[A-Za-z]/.test(w) && /[0-9@$!]/.test(w);
   // Counted without e-mail addresses and without a closing "!" ("Hello!").
-  const tokens = (out.replace(/\S+@\S+\.\w+/g, ' ').match(/[\p{L}0-9@$!]+/gu) ?? [])
+  const tokens = (withoutEmailLike(out).match(/[\p{L}0-9@$!]+/gu) ?? [])
     .map((w) => w.replace(/!+$/, ''))
     .filter((w) => /\p{L}/u.test(w));
   const versionLike = /^[A-Za-z]?\d+$|\d{2,}$|^[A-Z]+\d+$|^\d{2,}\p{L}+$|^[0-9a-f]{4,}$/u; // v2, sha256, MLH1, 200bini, 7f3a
@@ -284,7 +372,7 @@ export function deobfuscate(text: string): string {
   const mixed = words.filter((w) => w !== w.toLowerCase() && w !== w.toUpperCase() && w.slice(1) !== w.slice(1).toLowerCase()).length;
   // Turkish text lowercases I to ı, not i.
   if (words.length >= 4 && mixed / words.length > 0.5) return out.toLocaleLowerCase(/[ğşıİĞŞ]/.test(out) ? 'tr' : 'en');
-  out = out.replace(/[A-Za-z]{4,}/g, (word) => (!NAMING_STYLE.test(word) && (word.slice(1).match(/[a-z][A-Z]|[A-Z][a-z]/g)?.length ?? 0) >= 2 ? word.toLowerCase() : word));
+  out = out.replace(/[A-Za-z]{4,}/g, (word) => (!isNamingStyle(word) &&(word.slice(1).match(/[a-z][A-Z]|[A-Z][a-z]/g)?.length ?? 0) >= 2 ? word.toLowerCase() : word));
   return out;
 }
 

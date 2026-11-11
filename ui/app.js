@@ -53,6 +53,13 @@ const DETECTIONS = new Set(['block', 'would_block', 'redact', 'would_redact', 'w
 const BLOCKS = new Set(['block', 'would_block']);
 /** Text the model let through, logged by `ml.review` so it can be labelled: attack it missed, or harmless. */
 const isReview = (e) => e.verdict === 'info' && typeof e.score === 'number' && Boolean(e.excerpt);
+/**
+ * A random sample this short (an error message such as "Invalid request parameters") gives a reviewer nothing to judge, so it
+ * does not wait for a label. The firewall stopped logging them at this length (MIN_SAMPLE_CHARS in src/proxy.ts); records
+ * written earlier are filtered here. `reasonRaw` is the audit text as the firewall wrote it.
+ */
+const MIN_SAMPLE_CHARS = 40;
+const isShortSample = (e) => /ML sample for review/.test(e.reasonRaw ?? '') && (e.excerpt?.length ?? 0) < MIN_SAMPLE_CHARS;
 const AVATAR_COLORS = ['#0038ff', '#e8590c', '#30a46c', '#8e4ec6', '#0b84d6', '#e5484d', '#d6409f', '#12a594'];
 const DAYS = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
 const THRESHOLDS = [0.5, 0.7, 0.8, 0.9, 0.95];
@@ -284,7 +291,7 @@ function derive() {
   const detections = events.filter((e) => DETECTIONS.has(e.verdict));
   const ml = detections.filter((e) => typeof e.score === 'number');
   const reviews = events.filter(isReview);
-  const pending = [...ml, ...reviews].filter((e) => e.excerpt && !labels[e.id]);
+  const pending = [...ml, ...reviews].filter((e) => e.excerpt && !labels[e.id] && !isShortSample(e));
   return { events, labels, config, detections, ml, reviews, pending };
 }
 

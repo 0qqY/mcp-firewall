@@ -28,13 +28,13 @@ export const hasHiddenChars = (text: string): boolean => HIDDEN_CHARS.test(text)
 /**
  * True when a string anywhere in a JSON value holds hidden characters or escape sequences. Base64 payloads (an
  * image's `data`, a `blob`) are passed over: nothing hides in them, and they can be megabytes. Every other field
- * counts, `_meta` and the side fields of a media block included.
+ * counts, `_meta`, the side fields of a media block and property names included.
  */
 export function containsHiddenChars(v: unknown): boolean {
   const walk = (x: unknown): boolean => {
     if (typeof x === 'string') return HIDDEN_CHARS.test(x);
     if (Array.isArray(x)) return x.some(walk);
-    if (isObject(x)) return Object.entries(x).some(([k, y]) => !(typeof y === 'string' && isPayload(x, k, y)) && walk(y));
+    if (isObject(x)) return Object.entries(x).some(([k, y]) => HIDDEN_CHARS.test(k) || (!(typeof y === 'string' && isPayload(x, k, y)) && walk(y)));
     return false;
   };
   return walk(v);
@@ -48,7 +48,17 @@ export function stripHiddenChars(v: unknown): { value: unknown; removed: number 
     if (typeof x === 'string') return x.replace(re, () => (removed++, ''));
     if (Array.isArray(x)) return x.map(walk);
     if (isObject(x)) {
-      return Object.fromEntries(Object.entries(x).map(([k, y]) => [k, typeof y === 'string' && isPayload(x, k, y) ? y : walk(y)]));
+      // Property names are cleaned too; two keys that end up equal stay two keys.
+      const used = new Set<string>();
+      return Object.fromEntries(
+        Object.entries(x).map(([k, y]) => {
+          const clean = k.replace(re, () => (removed++, ''));
+          let key = clean;
+          if (clean !== k) for (let n = 2; used.has(key); n++) key = `${clean}#${n}`;
+          used.add(key);
+          return [key, typeof y === 'string' && isPayload(x, k, y) ? y : walk(y)];
+        }),
+      );
     }
     return x;
   };
