@@ -66,7 +66,8 @@ function loadCases() {
 
 // ---------------------------------------------------------------------------------------------------- policies
 const HOME = os.homedir();
-const MODEL_DIR = path.join(HOME, '.mcp-firewall', 'models', 'mcp-pi-mmbert-mixraw-ab4-evilsandangels-30').replace(/\\/g, '/');
+// AEB_MODEL: another model directory (absolute), to run the ML profiles with a candidate instead of the installed default.
+const MODEL_DIR = (process.env.AEB_MODEL ?? path.join(HOME, '.mcp-firewall', 'models', 'mcp-pi-mmbert-mixraw-ab4-evilsandangels-30')).replace(/\\/g, '/');
 
 function must(before, after, what) {
   if (before === after) throw new Error(`policy edit did not apply: ${what}`);

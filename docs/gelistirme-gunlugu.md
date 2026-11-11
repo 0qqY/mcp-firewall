@@ -871,3 +871,21 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     (nobody, read-only root, CapEff 0, `network: none`'da ağ yok, ro mount'a yazılamıyor), firewall öldürülünce
     container 1 sn içinde yok, GitHub MCP image'ı `network none` altında 46 tool listeliyor ve çıkışta container
     siliniyor. GitHub'a bağlanan test kullanıcının isteğiyle yapılmadı. AEB dört profilde aynı (katı 19/23/35/42 / 62).
+
+100. **`gap-40` dört farklı testle denendi: ayırma gücü aynı ya da daha iyi, ama eşik kayıyor (11.11.2026):** Kullanıcı
+    adayın başka testlerle de denenmesini istedi. (1) Eşit FPR (`bench/heldout/adaylar/gap40-esit-fpr-tablo.md`): her
+    standart kümede B30'un 0,3'teki FPR'sine eşitlenince `gap-40`'ın recall'u 16 kümenin 13'ünde eşit ya da yüksek
+    (havuz 83,7 → 85,3; %1 FPR'de 31,3 → 34,8); geride: hfho 78,3 → 74,4, hftr %1 FPR'de 26,9 → 14,9. (2) BIPIA
+    eşleşmiş kümesi (3.635 satır, ham görünüm): AUROC 0,702 → 0,708, recall @%1 FPR 23,6 → 26,2; %5 ve %10 FPR'de
+    aynı (30,6 / 31,6; 37,3 / 37,4). Ama 0,3 eşiğinde FPR %21,7 → %0,7 ve recall %48,7 → %25,2: `gap-40` uzun
+    belgelerde çok daha düşük skor veriyor, B30'un 0,3'üne denk gelen eşik burada yaklaşık 0,06. Yani ROC aynı,
+    kalibrasyon farklı; model değişirse eşik yeniden seçilmeli ve bu kümede 0,3 fiilen daha sıkı bir eşik. (3) AEB,
+    ML'li iki profil (`AEB_MODEL` ile aday model; `bench/aeb/run.mjs`'e eklendi): katı tespit aynı (35/62 ve 42/62),
+    benign 24/25 → 25/25 (B30'un tek false block'u kalktı), hata 0. (4) Poligon (`node poligon/dene.mjs hepsi`, iki
+    model art arda): e-posta senaryoları aynı; rug pull'da "yeni parametre (açıklama aynı)" senaryosunu ML tek başına
+    artık yakalamıyor (pinning yakalıyor), tarama katmanında fark edilmeyen değişiklik 1/5 → 2/5. ONNX export:
+    fp32 1.174 MB, PyTorch'la en büyük olasılık farkı 0,0000; int8 yine atıldı (200 satırda 5 karar değişti). Gerçek
+    audit log bu koşularda değişmedi (1786 satır önce/sonra). Değerlendirme: `gap-40` B30'dan kötü bir sıralayıcı
+    değil, çoğu yerde biraz iyi; kazancın büyük kısmı daha temkinli skorlamadan geliyor ve bunun bedeli uzun belgede
+    dolaylı injection ile tanım değişikliklerinde daha az yakalama. Default DEĞİŞMEDİ. `bench/bipia/report_bipia.py`
+    raporuna `gap40` eklendi.
