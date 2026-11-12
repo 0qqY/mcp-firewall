@@ -936,3 +936,15 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     dev 44; `gap3-40` 80,6 / 9,2, ek 20, dev 49; `gap3-50` 78,6 / 8,4, ek 23, dev 58. Eşit FP'de recall: B30 83,9,
     `gap2-30` 84,5, `gap3-30` 84,2, `gap3-40` 84,1, `gap3-50` 82,8, ham `gap3` 79,6. Sonuç: satır sayısını azaltmak
     işe yaramadı; `gap2-30` hâlâ kayıpsız tek aday. Default DEĞİŞMEDİ (B30).
+
+105. **`gap2-30` BIPIA, AEB ve poligonda denendi (12.11.2026):** ONNX export: fp32 1.174 MB, PyTorch'la en büyük
+    olasılık farkı 0,0000; int8 atıldı (200 satırda 5 karar değişti). (1) BIPIA eşleşmiş kümesi (3.635 satır, ham
+    görünüm): AUROC B30 0,702 / `gap-40` 0,708 / `gap2-30` 0,688; recall @%1 FPR 23,6 / 26,2 / 18,0; 0,3 eşiğinde
+    recall / FPR 48,7 / 21,7 — 25,2 / 0,7 — 63,0 / 39,2. `gap2-30` uzun belgelerde B30'dan yüksek skor veriyor:
+    false alarm neredeyse iki katı, sıralama gücü de düşük. (2) AEB, ML'li iki profil: katı tespit 35/62 → 34/62 ve
+    42/62 → 41/62 (kaçan vaka `mcp-tool-shadow-003`), benign 24/25 → 25/25 (`fp-mcp-tool-result-credential-
+    placeholder-019` artık geçiyor), hata 0. (3) Poligon: çıktı B30 ile satır satır aynı; `gap-40`'ın ML'le kaçırdığı
+    "yeni parametre (açıklama aynı)" rug pull'unu `gap2-30` yakalıyor (tarama katmanında fark edilmeyen 1/5). Koşular
+    yalıtılmış HOME ile yapıldı; gerçek audit log 1841 satır önce/sonra. Değerlendirme: `gap2-30` standart kümelerde
+    kayıpsız ama BIPIA'da belirgin geride ve AEB'de bir vaka kaybediyor; yeni sınıftaki kazancı (15 → 18 / 37) bunu
+    karşılamıyor. Default DEĞİŞMEDİ (B30). `bench/bipia/report_bipia.py` raporuna `gap2_30` eklendi.
