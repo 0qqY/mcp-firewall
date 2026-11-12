@@ -964,3 +964,23 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     kümede kayıp vermeden yeni sınıfı kapatıyor. Bedeli: ikinci 1,17 GB model (tanım taraması açıksa yüklenir) ve
     `ml.definitionModel` gibi bir policy alanı. Ürüne EKLENMEDİ; AEB ve poligonda bu düzenle ölçüm yapılmadı.
     Default DEĞİŞMEDİ (B30).
+
+107. **Üçlü soup (`tri`): `soup04-ab4` + ham `gap` + ham `gap2` (12.11.2026):** Soru: iki gap modelini birlikte
+    karıştırmak, tek tek karıştırmanın veremediği "yeni sınıfta kazanç, standart kümelerde kayıpsız" dengesini verir
+    mi? Altı oran denendi (hepsi `mixraw` soup'larının yeniden karıştırılmasıyla): `tri-g40-g250-50`, `tri-g40-g230-50`,
+    `tri-g40-g2raw-30`, `tri-b` (ab4/gap/gap2 = .53/.12/.35), `tri-c` (.57/.28/.15), `tri-d` (.50/.25/.25).
+    (1) 16 standart küme, B30'un FP sayısında (2.132) toplam hata: B30 3.725; `tri-g40-g250-50` 3.369 (−%9,6),
+    `tri-b` −%9,1, `tri-d` −%8,7, `gap-40` −%8,6, `tri-g40-g2raw-30` −%8,5, `tri-c` −%8,3, `tri-g40-g230-50` −%7,6,
+    `gap2-30` −%6,3. Ama en iyi adayın eşit-FP eşiği 0,034 (kırılgan); ürünün 0,3 eşiğinde kazanç yalnız −%2,6 ve
+    kayıp tool sonucu kümelerinde: recall / FPR 83,7 / 11,1 → 82,2 / 9,1; ind 91 → 87, obf 95 → 92, ml 96 → 93,
+    wtr 73 → 69 (boundary 74 → 82). (2) False alarm tarafı 0,3'te belirgin iyi: held-out v1 FP 23 → 8 (yakalama
+    143/150 aynı), Türkçe false alarm kümesi 316 → 158 / 2.875, gerçek tool tanımı 29 → 10 / 3.000. (3) Yeni sınıf
+    neredeyse kıpırdamadı: ek 15 → 16 / 37, paramdev 49 → 53 / 120, gapdev 112 → 103 / 240; en iyisi `tri-b` ek 19,
+    paramdev 63 (ham `gap2` 32 / 95). (4) BIPIA (ham görünüm): AUROC 0,702 → 0,689, recall @%1 FPR 23,6 → 19,4;
+    0,3'te recall / FPR 48,7 / 21,7 → 35,0 / 11,0. (5) ONNX export fp32 1.174 MB, PyTorch farkı 0,0000; int8 atıldı
+    (200 satırda 2 karar değişti). AEB, ML'li iki profil: 35/62 → 34/62 ve 42/62 → 41/62 (kaçan `mcp-tool-shadow-003`),
+    benign 24/25 → 25/25 — `gap2-30` ile aynı iki vaka. Poligon: çıktı B30 ve `gap2-30` ile satır satır aynı. Koşular
+    yalıtılmış HOME ile; gerçek audit log 1857 satır önce/sonra. Değerlendirme: üçlü soup yeni bir denge noktası
+    vermiyor; `tri-g40-g250-50` aslında "daha az false alarm, daha az yakalama" yönünde bir eşik kaydırması gibi
+    davranıyor ve yeni sınıfı kapatmıyor. Default DEĞİŞMEDİ (B30). Yeni sınıf için ölçülen tek kayıpsız yol hâlâ
+    madde 106'daki "tanımlarda ham `gap2`" düzeni. `bench/bipia/report_bipia.py` raporuna `tri_g250_50` eklendi.
