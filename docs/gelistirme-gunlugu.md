@@ -948,3 +948,19 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     yalıtılmış HOME ile yapıldı; gerçek audit log 1841 satır önce/sonra. Değerlendirme: `gap2-30` standart kümelerde
     kayıpsız ama BIPIA'da belirgin geride ve AEB'de bir vaka kaybediyor; yeni sınıftaki kazancı (15 → 18 / 37) bunu
     karşılamıyor. Default DEĞİŞMEDİ (B30). `bench/bipia/report_bipia.py` raporuna `gap2_30` eklendi.
+
+106. **"Veri isteği" kuralı denemesi ve kanal bulgusu (12.11.2026):** (1) Kural: tool tanımında ajanın elindeki veriyi
+    (konuşma, system prompt, başka servislerin credential'ı, yerel credential dosyaları, ortam değişkenleri, diğer
+    tool'ların sonuçları, kart/kimlik bilgisi) isteyen ifadeler için EN+TR 14 regex (`bench/heldout/dataask-deneme/`,
+    ürüne BAĞLANMADI). Eğitim çiftlerinde geliştirildi, sonra sınandı: eğitim 692/1178 (FP 1/1178), dev 31/120
+    (FP 0), held-out eki 34/37 (FP 0; bu kümeyi kuralı yazmadan önce görmüştüm, sayı iyimser), 239.054 gerçek tool
+    tanımında 644 false alarm (%0,27; çoğu "full transcript", `~/.aws/config`, "user's token"). Dev'de B30'un (49/120)
+    bile gerisinde: ifade çeşitliliği regex'le kapanmıyor, gevşetmek false alarmı artırır. Olumsuz sonuç; bilinen
+    hata: env-var deseni büyük/küçük harf ayırmadığı için `page_token`'a takılıyor. (2) Kanal bulgusu: ham `gap2`'nin
+    kaybı tool sonucu kümelerinde (ind, obf, ml); TANIM kanalında B30 kadar iyi ya da daha iyi. Held-out v1 tanım
+    satırları: B30 41/42, FP 1/47; ham `gap2` 41/42, FP 0/47. Gerçek tool tanımı (3.000): %1,0 → %0,3. Tanım
+    ağırlıklı standart kümeler: test 98,5 / 2,7 → 97,7 / 0,3; devsyn 99,0 / 1,8 → 97,9 / 0,6; devreal FP 2,2 → 2,5.
+    Yeni sınıf: ek 15 → 32 / 37, dev 49 → 95 / 120. Yani "tanımlarda ham `gap2`, geri kalanında B30" ölçülen hiçbir
+    kümede kayıp vermeden yeni sınıfı kapatıyor. Bedeli: ikinci 1,17 GB model (tanım taraması açıksa yüklenir) ve
+    `ml.definitionModel` gibi bir policy alanı. Ürüne EKLENMEDİ; AEB ve poligonda bu düzenle ölçüm yapılmadı.
+    Default DEĞİŞMEDİ (B30).
