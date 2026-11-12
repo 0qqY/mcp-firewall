@@ -915,3 +915,14 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     ind (91,2 → 86,3 / 82,3), obf (95,3 → 91,9 / 88,7) ve wtr'de (73,3 → 68,9 / 66,6) recall kaybediyor; eşit FP'de
     fark küçülüyor (kalibrasyon kayması). Karışım yeni sınıfı seyreltiyor. Ham `gap2` standart kümelerde ÖLÇÜLMEDİ;
     poligon, BIPIA, AEB ve ONNX export yapılmadı. Default DEĞİŞMEDİ (B30).
+
+103. **`gap2` ham model ve eşik taraması (12.11.2026):** Ham `gap2` 17 standart kümede 0,3 eşiğinde 75,4 / 7,5
+    (B30 83,7 / 11,1), eşit FP'de recall 79,4 (B30 83,9). Kayıp gerçek, eşik kayması değil: ind 91,2 → 69,3,
+    obf 95,3 → 78,4, ml 95,8 → 80,0, wtr 73,3 → 65,0 (eşit FP'de 81,3 / 82,7 / 79,5 / 69,9). Kazandığı yerler:
+    eva 100 / 0, lab 94,1 / 0, boundary 83,2, devvoice 100, hfho eşit FP'de 89,1. Yani ham model default olamaz.
+    Eşik taraması (0,3 → 0,05): skorlar iki uçta toplandığı için eşik düşürmek az şey değiştiriyor; `gap2-50`
+    0,05'te bile obf 92 / ind 86. `gap2-40` 0,05'te 84,7 / 10,6, ind 90, obf 95, ek 25/37, FP 0 — ama 0,05 kırılgan
+    bir eşik. Sonuç: yeni sınıftaki kazanç ham modelin ağırlığıyla orantılı, obf/ind/ml kaybı da öyle; soup bu
+    ikisini ayıramıyor. Kayıpsız tek aday `gap2-30` (83,9 / 10,3; ek 18/37; held-out FP 14) ama eva'da `gap-40`'ın
+    gerisinde (87,6 / 12,9'a karşı 100 / 6,5). `gap2` adaylarıyla poligon, BIPIA, AEB, ONNX export YAPILMADI.
+    Default DEĞİŞMEDİ (B30).
