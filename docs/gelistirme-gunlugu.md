@@ -926,3 +926,13 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     ikisini ayıramıyor. Kayıpsız tek aday `gap2-30` (83,9 / 10,3; ek 18/37; held-out FP 14) ama eva'da `gap-40`'ın
     gerisinde (87,6 / 12,9'a karşı 100 / 6,5). `gap2` adaylarıyla poligon, BIPIA, AEB, ONNX export YAPILMADI.
     Default DEĞİŞMEDİ (B30).
+
+104. **`gap3`: parametre verisi 800 satıra indirildi — olumsuz sonuç (12.11.2026):** Varsayım: 2.356 parametre satırı
+    ham `gap2`'yi obf/ind/ml'den uzaklaştırdı. Deney: `data/v12gap3` = v12gap + 400 çift (800 satır; 277 EN, 123 TR;
+    val'e 35 çift), aynı reçete, `soup04-ab4` ile %30/40/50. Varsayım YANLIŞ: ham `gap3` 17 standart kümede
+    75,6 / 8,3 (ham `gap2` 75,4 / 7,5), ind 72,6, obf 80,1, ml 81,4 — kayıp aynı. Kayıp parametre verisinden değil,
+    ham tek-eğitim modelinin kendisinden geliyor; soup bunu `soup04-ab4` ağırlığıyla kapatıyor. Yeni sınıf: ek
+    32/37 (aynı), dev 84/120 (`gap2` 95). Soup'lar `gap2` karşılıklarından biraz kötü: `gap3-30` 82,7 / 10,3, ek 17,
+    dev 44; `gap3-40` 80,6 / 9,2, ek 20, dev 49; `gap3-50` 78,6 / 8,4, ek 23, dev 58. Eşit FP'de recall: B30 83,9,
+    `gap2-30` 84,5, `gap3-30` 84,2, `gap3-40` 84,1, `gap3-50` 82,8, ham `gap3` 79,6. Sonuç: satır sayısını azaltmak
+    işe yaramadı; `gap2-30` hâlâ kayıpsız tek aday. Default DEĞİŞMEDİ (B30).
