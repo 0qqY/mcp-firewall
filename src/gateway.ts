@@ -42,6 +42,8 @@ export interface GatewayOptions {
   idleMinutes?: number;
   serverId: string;
   classifier?: () => Promise<Classifier>;
+  /** The model for the definition channel (`ml.definitionModel`). */
+  definitionClassifier?: () => Promise<Classifier>;
   /** Replaces fetch in tests. */
   fetch?: typeof fetch;
 }
@@ -127,8 +129,8 @@ class Session {
     private readonly gw: Gateway,
   ) {
     this.io = { clientIn: new PassThrough(), clientOut: new PassThrough(), serverIn: new PassThrough(), serverOut: new PassThrough() };
-    const { policy, audit, pins, classifier } = gw.options;
-    const proxy = new FirewallProxy(policy, audit, pins, this.io, classifier);
+    const { policy, audit, pins, classifier, definitionClassifier } = gw.options;
+    const proxy = new FirewallProxy(policy, audit, pins, this.io, classifier, undefined, definitionClassifier);
     // Each session is one client; MCP_FIREWALL_SESSION ties it to the client's stdio firewalls.
     if (proxy.taint && policy.taint.scope === 'shared' && process.env.MCP_FIREWALL_SESSION) {
       proxy.taint = new TaintTracker(policy.taint, gw.options.serverId, TaintTracker.sessionKey());

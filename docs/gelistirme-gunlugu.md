@@ -984,3 +984,19 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     vermiyor; `tri-g40-g250-50` aslında "daha az false alarm, daha az yakalama" yönünde bir eşik kaydırması gibi
     davranıyor ve yeni sınıfı kapatmıyor. Default DEĞİŞMEDİ (B30). Yeni sınıf için ölçülen tek kayıpsız yol hâlâ
     madde 106'daki "tanımlarda ham `gap2`" düzeni. `bench/bipia/report_bipia.py` raporuna `tri_g250_50` eklendi.
+
+108. **`ml.definitionModel`: tanımlar için ayrı model (13.11.2026):** Madde 106'daki düzen ürüne eklendi, varsayılan
+    olarak KAPALI. `ml.definitionModel` verilirse tanım kanalı (tool/prompt/resource tanımları, `instructions`) o
+    modelle, geri kalanı `ml.model` ile taranır; aynı `threshold`, `dtype`, `injectionLabel`. `src/policy.ts` (alan,
+    sandbox'ın koruduğu durum dosyalarına eklendi), `src/proxy.ts` (kanala göre model seçimi), `src/cli.ts`
+    (`classifierLoaders`; iki modelde skor önbelleği tanım modeline ait), `src/gateway.ts`. `scan.toolDefinitions: off`
+    iken ikinci model hiç yüklenmez. 2 yeni test, 249/249. Ham `gap2` ONNX'e export edildi
+    (`models/mcp-pi-mmbert-gap2`, fp32 1.174 MB; int8 kontrolü geçemedi, atıldı; export Türkçe Windows konsolunda
+    `PYTHONIOENCODING=utf-8` ister). Ölçüm (B30 → B30 + tanımlarda ham `gap2`, eşik 0,3): held-out eki (ONNX, ürün
+    metin hazırlığıyla) 15 → 32 / 37, FP 0/37; held-out v1 yakalama 143/150 aynı, FP 23 → 22 / 183. AEB (gerçek CLI,
+    `AEB_DEFINITION_MODEL`): `example-ml` 35/62, `example-ml-block` 42/62, benign 24/25 — 87 vakanın hiçbirinde sonuç
+    değişmedi; `gap2` 92 vaka kaydında yüklendi. Poligon (`MCP_FIREWALL_DEFINITION_MODEL`): e-posta ve rug pull
+    tabloları B30 ile aynı. Koşular yalıtılmış HOME ile; gerçek audit log'daki "aeb" satırı 27 önce/sonra. BIPIA
+    tool sonucu kümesi olduğundan bu düzende B30 ile aynıdır (yeniden koşulmadı). Bedeli: tanım tarandığında ikinci
+    ~1,2 GB model. Default DEĞİŞMEDİ (B30, `definitionModel` yok); kurulu kopya yenilenmedi, kurulu politikalar tanım
+    taramadığı için orada etkisi de olmazdı.

@@ -161,6 +161,9 @@ ml:
   enabled: false
   model: ./models/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30   # transformers.js uyumlu dizin (README: "Varsayılan model")
                                              # hazır baseline: ./models/protectai-deberta-v3-pi-v2 (fetch_baseline.ps1)
+  # definitionModel: ./models/mcp-pi-mmbert-gap2   # tanım kanalı (tool/prompt/resource tanımları, instructions) için ikinci
+                              # model; tool sonuçları ve geri kalanı `model`'de kalır. Verilmezse `model` her kanalı okur.
+                              # Aynı threshold, dtype ve injectionLabel kullanılır. Bedeli: tanım taranınca ikinci ~1,2 GB
   dtype: fp32                 # fp32 (onnx/model.onnx) | q8 (onnx/model_quantized.onnx; yalnızca export_onnx.py
                               # int8 kontrolünü geçen modellerde bulunur, mmBERT ve DeBERTa'da geçmiyor)
   injectionLabel: INJECTION   # modelin pozitif sınıf etiketi

@@ -69,6 +69,9 @@ const HOME = os.homedir();
 // AEB_MODEL: another model directory (absolute), to run the ML profiles with a candidate instead of the installed default.
 const MODEL_DIR = (process.env.AEB_MODEL ?? path.join(HOME, '.mcp-firewall', 'models', 'mcp-pi-mmbert-mixraw-ab4-evilsandangels-30')).replace(/\\/g, '/');
 
+// AEB_DEFINITION_MODEL: a second model directory (absolute) for the definition channel (ml.definitionModel), example-ml profiles only.
+const DEFINITION_MODEL_DIR = process.env.AEB_DEFINITION_MODEL?.replace(/\\/g, '/');
+
 function must(before, after, what) {
   if (before === after) throw new Error(`policy edit did not apply: ${what}`);
   return after;
@@ -91,6 +94,8 @@ function policyText(profile) {
     let t = fs.readFileSync(path.join(PROJECT, 'policy.example.yaml'), 'utf8');
     t = must(t, t.replace(/(\nml:\r?\n\s*enabled:\s*)false/, '$1true'), 'ml on');
     t = must(t, t.replace(/(\n\s*model:\s*)\.\/models\/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30/, `$1${MODEL_DIR}`), 'model path');
+    if (DEFINITION_MODEL_DIR) t = must(t, t.replace(`model: ${MODEL_DIR}`, `model: ${MODEL_DIR}
+  definitionModel: ${DEFINITION_MODEL_DIR}`), 'definition model');
     if (profile === 'example-ml-block') t = must(t, t.replace(/(\n\s*action:\s*)redact(\s+# redact \| block \| warn)/, '$1block$2'), 'dlp block');
     return t;
   }

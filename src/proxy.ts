@@ -144,8 +144,9 @@ export class FirewallProxy {
   private codeChecked = false;
   /** Tools the latest tools/list hid, and why: a hidden tool cannot be called by name either (clients cache lists). */
   private readonly hiddenTools = new Map<string, string>();
-  /** The model, from the first loadModel call on. */
+  /** The models, from their first loadModel call on. */
   private model?: Promise<Classifier>;
+  private definitionModel?: Promise<Classifier>;
   /** Sampling usage this session: start times of the last minute's requests, request and token totals. */
   private readonly samplingUse = { recent: [] as number[], requests: 0, tokens: 0 };
   /** Clock for the sampling rate window; tests replace it. */
@@ -173,6 +174,8 @@ export class FirewallProxy {
     private readonly classifier?: Classifier | (() => Promise<Classifier>),
     /** Fingerprints the server's code; called once, when the server first speaks (npx has installed it by then). */
     private readonly serverCode?: () => CodeFingerprint,
+    /** The model for the definition channel (`ml.definitionModel`); without it `classifier` reads every channel. */
+    private readonly definitionClassifier?: Classifier | (() => Promise<Classifier>),
   ) {
     const { taint } = policy;
     // A server with sources only still labels the session for the sinks of the client's other servers.
@@ -195,9 +198,10 @@ export class FirewallProxy {
     return this.policy.mode === 'enforce';
   }
 
-  private loadModel(): Promise<Classifier> {
-    const classifier = this.classifier!;
-    return (this.model ??= typeof classifier === 'function' ? classifier() : Promise.resolve(classifier));
+  private loadModel(channel: Channel = 'output'): Promise<Classifier> {
+    const load = (c: Classifier | (() => Promise<Classifier>)) => (typeof c === 'function' ? c() : Promise.resolve(c));
+    if (channel === 'definition' && this.definitionClassifier) return (this.definitionModel ??= load(this.definitionClassifier));
+    return (this.model ??= load(this.classifier!));
   }
 
   /** Records a policy violation; returns true when the message must actually be stopped. */
@@ -773,7 +777,7 @@ export class FirewallProxy {
       // to the classifier and would turn a masked result into a block. Embedded images go too (see stripImageData).
       // Affects only the scan input, not the output.
       const scan = texts.map((t) => stripImageData(t.replace(REDACTION_MARKER, 'redacted')));
-      const scores = await scoreTexts(await this.loadModel(), decoding.enabled ? scan.map(withDecoded) : scan, ml, channel);
+      const scores = await scoreTexts(await this.loadModel(channel), decoding.enabled ? scan.map(withDecoded) : scan, ml, channel);
       return scores.map((s) => {
         if (s.score >= ml.threshold) {
           return { reason: `ML classifier flagged possible prompt injection (score ${s.score.toFixed(3)})`, score: s.score, excerpt: s.excerpt };

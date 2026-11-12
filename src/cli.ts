@@ -194,22 +194,22 @@ function openAudit(policy: Policy, serverId: string): AuditLog {
  * that is a definition seen before is answered from the score cache (`ml.cacheDefinitions`): a client starts one
  * firewall per server, and each used to hold a gigabyte of weights whether its server was called or not.
  */
-function classifierLoader(policy: Policy, audit: AuditLog, onFail: () => void): (() => Promise<Classifier>) | undefined {
+function classifierLoader(policy: Policy, audit: AuditLog, onFail: () => void, model = policy.ml.model, cacheScores = true): (() => Promise<Classifier>) | undefined {
   if (!policy.ml.enabled) return undefined;
   // A missing model must fail loudly, not degrade silently, and before any server starts.
-  if (!existsSync(policy.ml.model)) {
-    process.stderr.write(`mcp-firewall: cannot load ML model ${policy.ml.model}: not found\n`);
+  if (!existsSync(model)) {
+    process.stderr.write(`mcp-firewall: cannot load ML model ${model}: not found\n`);
     process.exit(1);
   }
   let loading: Promise<Classifier> | undefined;
   const loadWeights = (): Promise<Classifier> => {
     if (loading) return loading;
     const started = Date.now();
-    loading = loadTransformersClassifier(policy.ml.model, policy.ml);
+    loading = loadTransformersClassifier(model, policy.ml);
     loading.then(
       (loaded) => audit.record({ verdict: 'info', reason: `ML classifier ${loaded.name} loaded in ${Date.now() - started} ms` }),
       (err: Error) => {
-        process.stderr.write(`mcp-firewall: cannot load ML model ${policy.ml.model}: ${err.message}\n`);
+        process.stderr.write(`mcp-firewall: cannot load ML model ${model}: ${err.message}\n`);
         onFail();
         process.exit(1);
       },
@@ -221,14 +221,27 @@ function classifierLoader(policy: Policy, audit: AuditLog, onFail: () => void): 
   // The files are checked now, so a broken model still stops the firewall before any server starts.
   let info: ModelInfo;
   try {
-    info = describeModel(policy.ml.model, policy.ml);
+    info = describeModel(model, policy.ml);
   } catch (err) {
-    process.stderr.write(`mcp-firewall: cannot load ML model ${policy.ml.model}: ${(err as Error).message}\n`);
+    process.stderr.write(`mcp-firewall: cannot load ML model ${model}: ${(err as Error).message}\n`);
     process.exit(1);
   }
-  const cache = policy.ml.cacheDefinitions ? new ScoreCache(policy.ml.cacheFile, info.fingerprint) : undefined;
+  const cache = cacheScores && policy.ml.cacheDefinitions ? new ScoreCache(policy.ml.cacheFile, info.fingerprint) : undefined;
   const classifier = lazyClassifier(info, loadWeights, cache);
   return () => Promise.resolve(classifier);
+}
+
+/**
+ * The loaders for a policy: the main model and, with `ml.definitionModel`, the one that reads definitions. Only
+ * definitions are remembered in the score cache, so with two models the cache belongs to the definition model.
+ */
+function classifierLoaders(policy: Policy, audit: AuditLog, onFail: () => void): { main?: () => Promise<Classifier>; definition?: () => Promise<Classifier> } {
+  const { definitionModel, scan } = policy.ml;
+  const split = definitionModel !== undefined && definitionModel !== policy.ml.model && scan.toolDefinitions !== 'off';
+  return {
+    main: classifierLoader(policy, audit, onFail, policy.ml.model, !split),
+    definition: split ? classifierLoader(policy, audit, onFail, definitionModel) : undefined,
+  };
 }
 
 /** `Name: value` with \${VAR} replaced from the environment; a missing variable is an error, not an empty credential. */
@@ -288,9 +301,9 @@ function runGateway(argv: string[]): void {
   const serverId = name ?? upstream.origin + upstream.pathname;
   const audit = openAudit(policy, serverId);
   const pins = policy.pinning.enabled ? new PinStore(policy.pinning.file, serverId) : undefined;
-  const classifier = classifierLoader(policy, audit, () => gateway.close());
+  const { main: classifier, definition: definitionClassifier } = classifierLoaders(policy, audit, () => gateway.close());
   if (!/^(127\.\d+\.\d+\.\d+|localhost|::1|\[::1\]|0\.0\.0\.0|::)$/i.test(host)) allowedHosts.push(host);
-  const gateway = new Gateway({ policy, audit, pins, upstream, headers, forwardAuthorization, path, allowedOrigins, allowedHosts, serverId, classifier });
+  const gateway = new Gateway({ policy, audit, pins, upstream, headers, forwardAuthorization, path, allowedOrigins, allowedHosts, serverId, classifier, definitionClassifier });
   if (!/^(127\.\d+\.\d+\.\d+|localhost|::1|\[::1\])$/i.test(host)) {
     process.stderr.write(`mcp-firewall: warning: listening on ${host}, reachable from other machines; the gateway has no authentication of its own\n`);
   }
@@ -383,7 +396,7 @@ async function main(): Promise<void> {
   const pins = policy.pinning.enabled ? new PinStore(policy.pinning.file, serverId) : undefined;
 
   // The proxy calls this once the handshake has been answered.
-  const loadClassifier = classifierLoader(policy, audit, () => child.kill());
+  const { main: loadClassifier, definition: loadDefinitionClassifier } = classifierLoaders(policy, audit, () => child.kill());
 
   // stdout belongs to the JSON-RPC stream; server stderr passes straight through for host logs.
   const child = spawn(launch?.command ?? options.command, launch?.args ?? options.args, { stdio: ['pipe', 'pipe', 'inherit'] });
@@ -422,7 +435,7 @@ async function main(): Promise<void> {
     clientOut: process.stdout,
     serverIn: child.stdin!,
     serverOut: child.stdout!,
-  }, loadClassifier, serverCode);
+  }, loadClassifier, serverCode, loadDefinitionClassifier);
   // Each server has its own firewall process; a shared tracker lets data read through one stop at another's sink.
   if (proxy.taint && policy.taint.scope === 'shared') proxy.taint = new TaintTracker(policy.taint, serverId, TaintTracker.sessionKey());
   proxy.start();

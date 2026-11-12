@@ -11,6 +11,8 @@ export const POLIGON = dirname(fileURLToPath(import.meta.url));
 export const REPO = resolve(POLIGON, '..');
 export const CLI = join(REPO, 'dist', 'src', 'cli.js');
 export const MODEL = process.env.MCP_FIREWALL_MODEL ?? join(REPO, 'models', 'mcp-pi-mmbert-mixraw-ab4-evilsandangels-30');
+// Tanım kanalı için ikinci model (ml.definitionModel); verilmezse MODEL her kanalı okur.
+export const TANIM_MODELI = process.env.MCP_FIREWALL_DEFINITION_MODEL;
 // ML eşiği: varsayılan model için 0,3. Önceki varsayılan (mix-ab4-lab-30) 0,9 ister; ikisini karşılaştırmak için:
 // MCP_FIREWALL_MODEL=<mutlak yol>/mcp-pi-mmbert-mix-ab4-lab-30 POLIGON_ESIK=0.9 node poligon/dene.mjs eposta
 export const ESIK = Number(process.env.POLIGON_ESIK ?? 0.3);
@@ -53,6 +55,7 @@ export function politikaMetni(k, { denetim, pin }) {
     'ml:',
     `  enabled: ${!!k.ml}`,
     `  model: ${j(MODEL)}`,
+    ...(TANIM_MODELI ? [`  definitionModel: ${j(TANIM_MODELI)}`] : []),
     `  threshold: ${ESIK}`,
     '  scan: { toolResults: block, toolDefinitions: hide }',
     '',

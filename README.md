@@ -572,6 +572,16 @@ Ardından politikada `ml.enabled: true` yap. Yalnızca fp32 kullanılır (`ml.dt
 varsayılan model için 0.3, öncekiler (mix-ab4-lab-30, soup04-ab4) ve baseline için 0.9. Kodun varsayılanı 0.9'da
 kaldı; politikada `ml.threshold` yazmayan bir kurulum yeni modelle 0.9'da çalışır.
 
+### Tanımlar için ayrı model (`ml.definitionModel`)
+`ml.definitionModel` verilirse tanım kanalı (tool, prompt, resource tanımları ve sunucu `instructions`'ı) o modelle,
+geri kalan her şey (tool sonuçları, `prompts/get`, sunucu istekleri) `ml.model` ile taranır. Verilmezse davranış
+değişmez. İki model aynı `threshold`, `dtype` ve `injectionLabel`'ı kullanır. Neden: "parametre açıklamasında ajanın
+elindeki veriyi isteyen tool" sınıfını ham `gap2` modeli tanımlarda yakalıyor (held-out eki 32/37, varsayılan model
+15/37) ama tool sonuçlarında varsayılan modelden zayıf; bu ayar ikisini kendi güçlü olduğu kanalda kullanır (ölçümler:
+geliştirme günlüğü madde 106 ve 108). Bedeli: tanımlar modelle tarandığında ikinci bir ~1,2 GB model yüklenir; skor
+önbelleği (`cacheDefinitions`) bu durumda tanım modeline aittir, yani tanımları değişmemiş sunucu onu da yüklemez.
+`scan.toolDefinitions: off` iken ayar etkisizdir ve ikinci model hiç yüklenmez. Varsayılan politikada KAPALIDIR.
+
 ### Bellek ve CPU kullanımı
 İstemci her sunucu için ayrı bir firewall süreci başlatır ve modeli yükleyen her süreç yaklaşık 1,6 GB tutar (fp32
 ağırlıklar). 10.11.2026'da 15 GB RAM'li makinede bir Claude Code oturumunun alt süreçleri (9'u firewall) toplam ~16 GB

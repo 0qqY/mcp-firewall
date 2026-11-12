@@ -105,6 +105,11 @@ export interface Policy {
   ml: {
     enabled: boolean;
     model: string;
+    /**
+     * A second model for the definition channel (tool, prompt and resource definitions, server instructions);
+     * everything else stays with `model`. Unset: `model` reads every channel.
+     */
+    definitionModel?: string;
     dtype: 'fp32' | 'fp16' | 'q8';
     injectionLabel: string;
     threshold: number;
@@ -492,6 +497,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
   for (const [value, path] of [[mlThreads, 'ml.threads'], [mlBatchSize, 'ml.batchSize']] as const) {
     if (!Number.isInteger(value)) throw new PolicyError(`${path}: expected a whole number`);
   }
+  const mlDefinitionModel = ml.definitionModel === undefined || ml.definitionModel === null ? undefined : filePath(ml.definitionModel, '', baseDir, 'ml.definitionModel');
   const mlCacheFile = filePath(ml.cacheFile, 'mcp-firewall-scores.jsonl', baseDir, 'ml.cacheFile');
 
   // The firewall's own files: a sandbox mount must not reach them.
@@ -500,6 +506,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
     filePath(pinning.file, 'mcp-firewall-pins.json', baseDir, 'pinning.file'),
     filePath(taint.dir, 'mcp-firewall-taint', baseDir, 'taint.dir'),
     filePath(ml.model, join('models', 'prompt-injection'), baseDir, 'ml.model'),
+    ...(mlDefinitionModel ? [mlDefinitionModel] : []),
     mlCacheFile,
   ];
 
@@ -565,6 +572,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
     ml: {
       enabled: bool(ml.enabled, false, 'ml.enabled'),
       model: filePath(ml.model, join('models', 'prompt-injection'), baseDir, 'ml.model'),
+      definitionModel: mlDefinitionModel,
       dtype: oneOf(ml.dtype, ['fp32', 'fp16', 'q8'] as const, 'fp32', 'ml.dtype'),
       injectionLabel: (ml.injectionLabel as string | undefined) ?? 'INJECTION',
       threshold: num(ml.threshold, 0.9, 0, 1, 'ml.threshold'),
