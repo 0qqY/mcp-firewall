@@ -1000,3 +1000,14 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     tool sonucu kümesi olduğundan bu düzende B30 ile aynıdır (yeniden koşulmadı). Bedeli: tanım tarandığında ikinci
     ~1,2 GB model. Default DEĞİŞMEDİ (B30, `definitionModel` yok); kurulu kopya yenilenmedi, kurulu politikalar tanım
     taramadığı için orada etkisi de olmazdı.
+
+109. **Gerçek Türkçe tool sonuçlarında false alarm ölçümü (13.11.2026):** HF Türkçe benchmark'ı chat girdisi için
+    yapılmış olduğundan gerçek metinlerle ölçüldü (`bench/heldout/collect_tr_real.py`, rapor
+    `bench/heldout/gercek-turkce-olcum.md`; metinler git'e girmez). 750 Türkçe + 300 İngilizce kontrol metni, B30, ürün metin
+    hazırlığı, eşik 0,3: tr.wikipedia ve tr.wikisource %1,3; tr.wikibooks %7,3 (en.wikibooks %1,3); Türkçe GitHub README
+    %20,7 (İngilizce README %13,3); Türkçe issue %8,0; Türkçe toplam %7,7, alarmların çoğu 0,9'un üstünde. İşaretlenen
+    80 metnin hepsi elle okundu, hiçbiri saldırı değil. Sonuç: sorun "Türkçe" değil, okuyana emir kipiyle hitap eden
+    metin (kurulum rehberi, ödev, ders); Türkçe bunu 1,6-5,6 kat büyütüyor. Kurulu policy'de `toolResults: block`
+    olduğu için fetch/GitHub ile Türkçe README okuyan ajan kabaca 5'te 1 bloklanır. Önceki turların negatif verisi AI'a
+    verilen emirlerdi (saldırıyla aynı şekil); bu metinler insana emir veriyor, eğitimle ayrılabilir görünüyor. Kod ve
+    policy değişmedi.
