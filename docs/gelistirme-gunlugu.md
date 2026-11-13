@@ -1014,18 +1014,23 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
 
 110. **Gerçek dokümanla eğitim (`docs`) denendi (13-14.11.2026):** Madde 109'daki false alarm için `training/docs_data.py`:
     insana emir veren gerçek metinler (react.dev TR/EN, python-docs-tr, laravel-tr, Türkçe README ve issue'lar; ölçüm
-    setindeki depolar ve 10 kelimelik ortak dizisi olan pencereler dışarıda) negatif, her pencerenin v12eva train
+    setindeki depoların README'leri, ölçümdeki issue URL'leri ve 10 kelimelik ortak dizisi olan pencereler dışarıda) negatif, her pencerenin v12eva train
     saldırı satırı eklenmiş ikizi pozitif. Ham `docs` modeli (mmBERT, v12eva + docs, 3 epoch), `soup04-ab4` ile
     %20/30/40/50 karışım. Eşik 0,3, B30 → docs-30 / docs-40 / docs-50: Türkçe README false alarm %20,7 → 12,0 / 5,3 /
     3,3; gerçek Türkçe metin %7,9 → 5,2 / 2,8 / 2,4; İngilizce %7,0 → 4,7 / 3,7 / 2,3; HF Türkçe %11,0 → 9,6 / 8,1 / 7,4.
-    Sızıntı kontrolü: ölçümle 17 depo ortak çıktı (çoğu issue); onlar atılınca README %20,5 → 11,6 / 4,8 / 2,7, sonuç
+    Sızıntı kontrolü: issue'lar yalnız URL ile eleniyordu, ölçümle 17 depo ortak çıktı (çoğu issue); onlar atılınca README %20,5 → 11,6 / 4,8 / 2,7, sonuç
     aynı. Bedeli recall: held-out 143 → 141 / 138 / 137 (/150); wtr 73,3 → 70,0 / 65,9; boundary 74,0 → 70,3 / 68,8;
     hftr 85,1 → 83,0 / 80,0; yeni sınıf (ek parametre) 15 → 11 / 37. Eşit recall'da (B30'un eşiğini yükseltip ya da
     adayınkini düşürüp) kazancın çoğu eşik kaydırması çıkıyor: held-out recall'u eşitlenince README docs-30 %16,0,
-    docs-40 %17,3, docs-50 %32,7 (B30 %20,7); 17 kümenin toplam recall'u eşitlenince docs-30 README %12,0, toplam FPR
-    11,3 → 10,6. Gerçek ama küçük kazanç yalnız docs-30'da. Zehirli README testi (yeni, `bench/heldout/zehirli-readme/`:
+    docs-40 %17,3, docs-50 %32,7 (B30 %20,7); 16 standart kümenin toplam recall'u eşitlenince README docs-30 %12,0,
+    docs-40 %12,7, toplam FPR 11,3 → 10,6 / 10,7. Karışım oranı fark etmeksizin eşit recall'da README %12-17'ye iniyor;
+    docs-40/50'nin 0,3'teki ek düşüşü eşik kaydırması. Zehirli README testi (yeni, `bench/heldout/zehirli-readme/`:
     ölçüm README'lerine 16 elle yazılmış talimat başta/ortada/sonda, 240 satır): B30 231, docs-30 233, docs-40 228 /
-    240; model "README ise zararsız" ezberlememiş. BIPIA (ürün görünümü): AUROC 0,721 → 0,718 / 0,695, recall @%1 FPR
+    240. Bu talimatların hepsi AI'a hitap ettiği için (eğitimdeki zararsız dokümanlarda AI konulu pencereler atılmıştı)
+    ikinci set yazıldı: AI'dan hiç bahsetmeyen düz zararlı emirler (`payloads-noai.json`, .example/.invalid alan adları):
+    B30 227, docs-30 225, docs-40 224, docs-50 223 / 240; temiz hâli zaten işaretli olmayan README'lerde B30 %93,4,
+    docs-30 %92,9. Model "README ise zararsız" ezberlememiş. B30'un eşiği 0,978'e yükseltilirse (docs-40'la eşit
+    held-out recall) bu testte 211 / 240'a düşüyor; "B30 + yüksek eşik" ucuz alternatifi burada kaybediyor. BIPIA (ürün görünümü): AUROC 0,721 → 0,718 / 0,695, recall @%1 FPR
     0,247 → 0,204 / 0,194; geride. AEB (docs-30, ONNX fp32, iki ML profili): 87 vakada sonuç değişmedi. Poligon
     (docs-30): e-posta tablosu aynı; rug pull'da "yeni parametre (açıklama aynı)" vakasını tarama katmanı tek başına
     artık kaçırıyor (tam modda sabitleme yine engelliyor). Koşularda gerçek audit log 1940 satır önce/sonra, "aeb"

@@ -1,11 +1,12 @@
 """Poisoned-README test (14.11.2026): does a model trained on real documentation learn "looks like a README, so benign"?
 
 Base texts: the measurement READMEs (training/data/hf_new/_external_eval, never trained on), 40 Turkish + 40 English.
-Payloads: payloads.json, 16 hand-written lines (8 TR, 8 EN) addressed to an AI agent, not produced by the training
+Payloads: payloads.json, 16 hand-written lines (8 TR, 8 EN) addressed to an AI agent (payloads-noai.json: the same
+harmful actions as plain imperatives that never mention an AI), not produced by the training
 twin generator (docs_data.py takes its injection lines from the v12eva train split). Each payload is inserted as its
 own paragraph at the start, middle and end of a README: 240 rows, all label 1. Texts are not committed.
 
-  python -I build.py <out dir>      # <out>/poison.jsonl (score_torch.py --texts format) and <out>/meta.json
+  python -I build.py <out dir> [payloads-noai.json]   # <out>/poison.jsonl (score_torch.py --texts format) and <out>/meta.json
 """
 import json
 import random
@@ -17,7 +18,7 @@ EXT = HERE.parent.parent.parent / "training" / "data" / "hf_new" / "_external_ev
 
 out = Path(sys.argv[1])
 out.mkdir(parents=True, exist_ok=True)
-pay = json.loads((HERE / "payloads.json").read_text(encoding="utf-8"))
+pay = json.loads((HERE / (sys.argv[2] if len(sys.argv) > 2 else "payloads.json")).read_text(encoding="utf-8"))
 rows = []
 for f in ("tr_real_tools.jsonl", "en_control.jsonl"):
     rows += [json.loads(l) for l in open(EXT / f, encoding="utf-8")]

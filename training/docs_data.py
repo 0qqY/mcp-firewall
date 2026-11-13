@@ -9,8 +9,10 @@ Each benign window can get an attack twin: the same window with one injection li
 paragraph break (label 1), so "documentation" alone must not decide; a poisoned README is a real attack path.
 
 Sources are kept apart from the measurement set (bench/heldout/collect_tr_real.py): no wikibooks/wikipedia/wikisource, other
-GitHub search queries, and any repository or issue in the measurement files is skipped; windows that share a 10-word sequence
-with a measurement or held-out row are dropped.
+GitHub search queries; READMEs of any repository in the measurement files are skipped, but issues are skipped only by exact
+URL, so other issues of a measured repository can come in (17 shared repositories in the 13.11.2026 build; removing those
+measurement rows did not change the result, journal 110); windows that share a 10-word sequence with a measurement or
+held-out row are dropped.
 
   python -I docs_data.py fetch                                   # data/docs/docs_raw.jsonl (documents)
   python -I docs_data.py rows                                    # data/docs/docs_rows.jsonl (held-out row format)
