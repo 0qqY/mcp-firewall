@@ -1011,3 +1011,24 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     olduğu için fetch/GitHub ile Türkçe README okuyan ajan kabaca 5'te 1 bloklanır. Önceki turların negatif verisi AI'a
     verilen emirlerdi (saldırıyla aynı şekil); bu metinler insana emir veriyor, eğitimle ayrılabilir görünüyor. Kod ve
     policy değişmedi.
+
+110. **Gerçek dokümanla eğitim (`docs`) denendi (13-14.11.2026):** Madde 109'daki false alarm için `training/docs_data.py`:
+    insana emir veren gerçek metinler (react.dev TR/EN, python-docs-tr, laravel-tr, Türkçe README ve issue'lar; ölçüm
+    setindeki depolar ve 10 kelimelik ortak dizisi olan pencereler dışarıda) negatif, her pencerenin v12eva train
+    saldırı satırı eklenmiş ikizi pozitif. Ham `docs` modeli (mmBERT, v12eva + docs, 3 epoch), `soup04-ab4` ile
+    %20/30/40/50 karışım. Eşik 0,3, B30 → docs-30 / docs-40 / docs-50: Türkçe README false alarm %20,7 → 12,0 / 5,3 /
+    3,3; gerçek Türkçe metin %7,9 → 5,2 / 2,8 / 2,4; İngilizce %7,0 → 4,7 / 3,7 / 2,3; HF Türkçe %11,0 → 9,6 / 8,1 / 7,4.
+    Sızıntı kontrolü: ölçümle 17 depo ortak çıktı (çoğu issue); onlar atılınca README %20,5 → 11,6 / 4,8 / 2,7, sonuç
+    aynı. Bedeli recall: held-out 143 → 141 / 138 / 137 (/150); wtr 73,3 → 70,0 / 65,9; boundary 74,0 → 70,3 / 68,8;
+    hftr 85,1 → 83,0 / 80,0; yeni sınıf (ek parametre) 15 → 11 / 37. Eşit recall'da (B30'un eşiğini yükseltip ya da
+    adayınkini düşürüp) kazancın çoğu eşik kaydırması çıkıyor: held-out recall'u eşitlenince README docs-30 %16,0,
+    docs-40 %17,3, docs-50 %32,7 (B30 %20,7); 17 kümenin toplam recall'u eşitlenince docs-30 README %12,0, toplam FPR
+    11,3 → 10,6. Gerçek ama küçük kazanç yalnız docs-30'da. Zehirli README testi (yeni, `bench/heldout/zehirli-readme/`:
+    ölçüm README'lerine 16 elle yazılmış talimat başta/ortada/sonda, 240 satır): B30 231, docs-30 233, docs-40 228 /
+    240; model "README ise zararsız" ezberlememiş. BIPIA (ürün görünümü): AUROC 0,721 → 0,718 / 0,695, recall @%1 FPR
+    0,247 → 0,204 / 0,194; geride. AEB (docs-30, ONNX fp32, iki ML profili): 87 vakada sonuç değişmedi. Poligon
+    (docs-30): e-posta tablosu aynı; rug pull'da "yeni parametre (açıklama aynı)" vakasını tarama katmanı tek başına
+    artık kaçırıyor (tam modda sabitleme yine engelliyor). Koşularda gerçek audit log 1940 satır önce/sonra, "aeb"
+    satırı 27. Değerlendirme: README false alarm'ı gerçekten düşüyor ama BIPIA, yeni sınıf ve Türkçe dolaylı saldırıda
+    recall kaybı var; default DEĞİŞMEDİ (B30). `models/mcp-pi-mmbert-mixraw-ab4-docs-30` ONNX'i (int8 atıldı) yerelde
+    duruyor; `bench/bipia/report_bipia.py` raporuna `docs30`, `docs40` eklendi.
