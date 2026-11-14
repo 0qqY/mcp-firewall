@@ -1,8 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import spawn from 'cross-spawn';
 import type { CodeFingerprint } from './codepin.js';
+import { EGRESS_PORT, type EgressRule } from './egress.js';
 
 /**
  * Runs the wrapped MCP server inside a locked-down Docker container instead of directly on the host.
@@ -21,6 +23,15 @@ export interface SandboxMount {
   /** Absolute path inside the container. */
   target: string;
   readOnly: boolean;
+}
+
+/** `sandbox.egress`: the server may reach only these destinations, through the firewall's own proxy. */
+export interface SandboxEgress {
+  /** The allowlist as written in the policy (`host[:port]`, `*.domain[:port]`). */
+  allow: string[];
+  rules: EgressRule[];
+  /** Image with `node` in it that runs the proxy (the firewall's own code, mounted read-only). */
+  proxyImage: string;
 }
 
 export interface SandboxConfig {
@@ -47,6 +58,8 @@ export interface SandboxConfig {
   protectedPaths: string[];
   /** Mounts may not contain these (a sub-folder is fine): the home directory and the policy's own folder. */
   protectedRoots: string[];
+  /** When set, `network` is `none` and the server instead sits on an internal network whose only exit is the proxy. */
+  egress?: SandboxEgress;
 }
 
 export const SANDBOX_DEFAULTS = {
@@ -73,7 +86,11 @@ export const isNetworkName = (v: string): boolean => /^[A-Za-z0-9][A-Za-z0-9_.-]
 export const isSize = (v: string): boolean => /^[1-9]\d{0,9}[bkmg]?$/.test(v);
 export const isUser = (v: string): boolean => /^\d{1,10}(?::\d{1,10})?$/.test(v);
 /** Variables the sandbox sets itself. */
+export const PROXY_ENV = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy'];
 export const RESERVED_ENV = new Set(['HOME', 'PATH']);
+/** Set by the sandbox when `egress` is on, so they cannot be passed through then. */
+export const EGRESS_RESERVED_ENV = new Set([...PROXY_ENV, 'NODE_USE_ENV_PROXY']);
+export const DEFAULT_PROXY_IMAGE = 'node:22-alpine';
 export const isEnvName = (v: string): boolean => /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(v);
 /**
  * Characters that break the `--mount` option syntax: Docker reads it as one CSV record, so a comma starts a new
@@ -141,6 +158,15 @@ export interface SandboxLaunch {
   args: string[];
   /** Container name, so it can be stopped when the firewall ends. */
   container: string;
+  /** With `sandbox.egress`: the internal network and the proxy that must be up before the server starts. */
+  egress?: EgressLaunch;
+}
+
+export interface EgressLaunch {
+  /** Internal network (no route out) shared by the server and the proxy. */
+  network: string;
+  /** `docker run` of the proxy; it starts on `bridge` and is then connected to `network`. */
+  proxy: { command: string; args: string[]; container: string };
 }
 
 export interface LaunchOptions {
@@ -153,6 +179,8 @@ export interface LaunchOptions {
   exists?: (path: string) => boolean;
   realpath?: (path: string) => string;
   executable?: string;
+  /** Compiled proxy files to mount; defaults to the ones next to this module. */
+  egressFiles?: { main: string; lib: string };
 }
 
 function containerName(serverId: string, random: () => string): string {
@@ -174,12 +202,13 @@ export function buildSandboxCommand(cfg: SandboxConfig, server: { command: strin
   const realpath = options.realpath ?? realpathSync;
   const container = containerName(options.serverId, options.random ?? (() => randomBytes(3).toString('hex')));
 
+  const egress = cfg.egress ? buildEgress(cfg, cfg.egress, container, options) : undefined;
   const args = [
     'run', '--rm', '-i', '--init',
     '--name', container,
     '--label', 'mcp-firewall=1',
     '--pull', cfg.pull,
-    '--network', cfg.network,
+    '--network', egress?.network ?? cfg.network,
     '--cap-drop', 'ALL',
     '--security-opt', 'no-new-privileges:true',
     '--pids-limit', String(cfg.pidsLimit),
@@ -195,6 +224,12 @@ export function buildSandboxCommand(cfg: SandboxConfig, server: { command: strin
     if (env[name] === undefined) throw new SandboxError(`sandbox.env: environment variable ${name} is not set`);
     args.push('-e', name);
   }
+  if (egress) {
+    // Advisory only: the internal network is what stops a server that ignores these.
+    const url = `http://${egress.proxy.container}:${EGRESS_PORT}`;
+    for (const name of PROXY_ENV.slice(0, 4)) args.push('-e', `${name}=${url}`);
+    args.push('-e', 'NODE_USE_ENV_PROXY=1');
+  }
   for (const mount of cfg.mounts) {
     if (!exists(mount.source)) throw new SandboxError(`sandbox.mounts: ${mount.source} does not exist`);
     const real = realpath(mount.source);
@@ -207,7 +242,75 @@ export function buildSandboxCommand(cfg: SandboxConfig, server: { command: strin
   if (cfg.workdir) args.push('-w', cfg.workdir);
   // --entrypoint makes the command after "--" the program that runs, whatever the image's own entrypoint is.
   args.push('--entrypoint', server.command, cfg.image, ...server.args);
-  return { command: options.executable ?? 'docker', args, container };
+  return { command: options.executable ?? 'docker', args, container, egress };
+}
+
+function defaultEgressFiles(): { main: string; lib: string } {
+  return { main: fileURLToPath(new URL('./egress-main.js', import.meta.url)), lib: fileURLToPath(new URL('./egress.js', import.meta.url)) };
+}
+
+/** The proxy container: as locked down as the server's, with only the firewall's two proxy files mounted. */
+function buildEgress(cfg: SandboxConfig, egress: SandboxEgress, container: string, options: LaunchOptions): EgressLaunch {
+  const files = options.egressFiles ?? defaultEgressFiles();
+  for (const f of [files.main, files.lib]) {
+    if (hasMountBreaker(f)) throw new SandboxError(`sandbox.egress: the firewall is installed under a path with a comma, quote or control character (${f}), which the mount option cannot carry`);
+  }
+  const proxy = `${container}-egress`;
+  const args = [
+    'run', '--rm', '-i', '--init',
+    '--name', proxy,
+    '--label', 'mcp-firewall=1',
+    '--pull', cfg.pull,
+    '--network', 'bridge',
+    '--cap-drop', 'ALL',
+    '--security-opt', 'no-new-privileges:true',
+    '--pids-limit', '64',
+    '--memory', '128m',
+    '--memory-swap', '128m',
+    '--cpus', '0.5',
+    '--user', '65534:65534',
+    '--read-only',
+    '-e', `MCP_FW_EGRESS=${egress.allow.join(',')}`,
+    '--mount', `type=bind,source=${files.main},target=/fw/egress-main.js,readonly`,
+    '--mount', `type=bind,source=${files.lib},target=/fw/egress.js,readonly`,
+    '--entrypoint', 'node',
+    egress.proxyImage, '/fw/egress-main.js',
+  ];
+  return { network: `${container}-net`, proxy: { command: options.executable ?? 'docker', args, container: proxy } };
+}
+
+const firstLine = (r: RunResult): string => (r.error?.message ?? r.stderr).trim().split('\n')[0];
+
+/**
+ * Removes internal networks an earlier firewall left behind (hard kill), then creates this one. Only networks
+ * with the firewall's label, unused and older than five minutes: another firewall attaches its proxy within seconds of
+ * creating its network, so a fresh one is never touched.
+ */
+export function createEgressNetwork(egress: EgressLaunch, run: Runner = defaultRunner, executable = 'docker'): void {
+  run(executable, ['network', 'prune', '--force', '--filter', 'label=mcp-firewall=1', '--filter', 'until=5m'], 20_000);
+  const r = run(executable, ['network', 'create', '--internal', '--label', 'mcp-firewall=1', egress.network], 20_000);
+  if (r.error || r.status !== 0) throw new SandboxError(`sandbox.egress: cannot create network ${egress.network}: ${firstLine(r)}`);
+}
+
+/** Puts the running proxy on the internal network, next to the server. */
+export function connectEgressProxy(egress: EgressLaunch, run: Runner = defaultRunner, executable = 'docker'): void {
+  const r = run(executable, ['network', 'connect', egress.network, egress.proxy.container], 20_000);
+  if (r.error || r.status !== 0) throw new SandboxError(`sandbox.egress: cannot attach the proxy to ${egress.network}: ${firstLine(r)}`);
+}
+
+/** Best effort, at exit: the proxy, then the network (which Docker removes only once no container uses it). */
+export function removeEgress(egress: EgressLaunch, run: Runner = defaultRunner, executable = 'docker', wait: (ms: number) => void = sleepSync): void {
+  killContainer(egress.proxy.container, run, executable);
+  for (let i = 0; i < 6; i++) {
+    const r = run(executable, ['network', 'rm', egress.network], 10_000);
+    if (r.status === 0 || /not found|no such network/i.test(r.stderr)) return;
+    // A killed container is removed asynchronously (--rm); give it a moment before the next try.
+    wait(500);
+  }
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 /** The command line as a user would type it, quoted for the shell of the current platform. */
@@ -246,6 +349,15 @@ export function inspectImage(image: string, run: Runner = defaultRunner, executa
 
 /** Fails early, with a message that says what to do, when the sandbox cannot start. Returns the image id when the image is local. */
 export function preflight(cfg: SandboxConfig, run: Runner = defaultRunner, executable = 'docker'): string | undefined {
+  if (cfg.egress) {
+    const proxy = inspectImage(cfg.egress.proxyImage, run, executable);
+    if (proxy.kind === 'missing' && cfg.pull === 'never') {
+      throw new SandboxError(`sandbox.egress: proxy image ${cfg.egress.proxyImage} is not present locally and sandbox.pull is "never"; run: docker pull ${cfg.egress.proxyImage}`);
+    }
+    if (proxy.kind === 'no-docker') throw new SandboxError('sandbox: the docker command was not found; install Docker or turn the sandbox off');
+    if (proxy.kind === 'unreachable') throw new SandboxError('sandbox: Docker is installed but not reachable; start Docker Desktop (or the docker service) and try again');
+    if (proxy.kind === 'error') throw new SandboxError(`sandbox.egress: cannot inspect proxy image ${cfg.egress.proxyImage}: ${proxy.problem}`);
+  }
   const status = inspectImage(cfg.image, run, executable);
   if (status.kind === 'ok') return status.id;
   if (status.kind === 'missing') {
@@ -269,8 +381,17 @@ export function sandboxFingerprint(cfg: SandboxConfig, extra?: CodeFingerprint, 
   if (!/@sha256:[0-9a-f]{64}$/.test(cfg.image)) {
     notes.push(`sandbox image ${cfg.image} is referenced by a tag; it is pinned by its image id, so a re-tagged or rebuilt image will show up as changed server code`);
   }
-  const hash = createHash('sha256').update(`docker-image:${status.id}\0${extra?.hash ?? ''}`).digest('hex');
-  return { hash, roots: extra?.roots ?? [], packages: [`image ${cfg.image} (${status.id.slice(7, 19)})`, ...(extra?.packages ?? [])], notes };
+  const packages = [`image ${cfg.image} (${status.id.slice(7, 19)})`];
+  let proxyId = '';
+  if (cfg.egress) {
+    // The proxy decides what leaves the sandbox, so a swapped proxy image counts as changed server code too.
+    const proxy = inspectImage(cfg.egress.proxyImage, run, executable);
+    if (proxy.kind !== 'ok') throw new Error(`cannot identify egress proxy image ${cfg.egress.proxyImage}: ${proxy.problem}`);
+    proxyId = proxy.id;
+    packages.push(`egress proxy image ${cfg.egress.proxyImage} (${proxy.id.slice(7, 19)})`);
+  }
+  const hash = createHash('sha256').update(`docker-image:${status.id}\0${extra?.hash ?? ''}${proxyId ? `\0egress-proxy:${proxyId}` : ''}`).digest('hex');
+  return { hash, roots: extra?.roots ?? [], packages: [...packages, ...(extra?.packages ?? [])], notes };
 }
 
 /** Best effort: a container whose docker client was killed (always the case on Windows) keeps running until stopped. */
@@ -285,5 +406,6 @@ export function killContainer(container: string, run: Runner = defaultRunner, ex
 /** What the sandbox does, one line per setting, for the audit log and `sandbox show`. */
 export function describeSandbox(cfg: SandboxConfig): string {
   const mounts = cfg.mounts.map((m) => `${m.source} -> ${m.target} (${m.readOnly ? 'ro' : 'rw'})`).join('; ') || 'none';
-  return `image ${cfg.image}, network ${cfg.network}, ${cfg.readOnly ? 'read-only root' : 'writable root'}, user ${cfg.user}, memory ${cfg.memory}, cpus ${cfg.cpus}, pids ${cfg.pidsLimit}, env [${cfg.env.join(', ')}], mounts: ${mounts}`;
+  const network = cfg.egress ? `internal, egress only to [${cfg.egress.allow.join(', ')}] via proxy ${cfg.egress.proxyImage}` : cfg.network;
+  return `image ${cfg.image}, network ${network}, ${cfg.readOnly ? 'read-only root' : 'writable root'}, user ${cfg.user}, memory ${cfg.memory}, cpus ${cfg.cpus}, pids ${cfg.pidsLimit}, env [${cfg.env.join(', ')}], mounts: ${mounts}`;
 }

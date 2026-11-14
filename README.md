@@ -277,6 +277,7 @@ yakalayamazsınız. `sandbox` açıkken sunucu makinede değil, kilitli bir Dock
 | `env` | boş | Makinenizden konteynere geçen değişken **adları**; değer komut satırına yazılmaz (`-e ADI`) |
 | `mounts` | boş | Bağlanan klasörler, varsayılan salt okunur (`mode: rw` ile yazılabilir). Ev dizini, `~/.ssh`, `~/.aws` gibi kimlik bilgisi klasörleri, politikanın kendi klasörü, denetim/pin/taint dosyaları, ML modeli ve Docker soketi bağlanamaz; sembolik bağlar çözüldükten sonra yeniden denetlenir |
 | `pull` | `never` | Yalnızca yerel image kullanılır, firewall kendiliğinden indirme yapmaz; `missing` veya `always` ile değişir |
+| `egress` | yok | Çıkış izin listesi (14.11.2026): sunucu yalnızca listedeki `host[:port]` hedeflerine bağlanabilir; aşağıda "Çıkış izin listesi" |
 
 ```yaml
 # dosya.yaml (sunucu başına ayrı politika dosyası: image, ağ ve klasörler her sunucuda farklıdır)
@@ -316,10 +317,53 @@ mcp-firewall sandbox show --policy dosya.yaml -- mcp-server-filesystem /workspac
   kendiliğinden biter (Windows'ta GitHub MCP image'ıyla denendi: 1 saniye içinde).
 - Docker çalışmıyorsa ya da image yerelde yoksa (`pull: never`) firewall başlamaz ve ne yapılacağını söyler; sunucu sandbox'sız ayağa kalkmaz.
 
+#### Çıkış izin listesi (`egress`)
+
+Ağı gereken bir sunucuya (`bridge`) bütün internet ve makinenin yerel servisleri açılır. `egress` ile sunucu yalnızca
+listelediğiniz hedeflere çıkar:
+
+```yaml
+sandbox:
+  enabled: true
+  image: ghcr.io/github/github-mcp-server:v2.0.3
+  env: [GITHUB_PERSONAL_ACCESS_TOKEN]
+  egress:
+    allow: [api.github.com, "*.githubusercontent.com"]   # host[:port], port verilmezse 443 (örnek; GitHub image'ıyla denenmedi)
+```
+
+- Sunucu konteyneri kendine ait bir Docker `--internal` ağına konur: o ağdan hiçbir yere yol yoktur (doğrudan IP, DNS,
+  `host.docker.internal` ve makinenin adresleri denendi, hepsi kapalı). Tek çıkış, aynı ağa bağlanan küçük bir HTTP CONNECT
+  proxy'sidir. Proxy firewall'un kendi kodudur (`src/egress.ts`), ayrı ve aynı şekilde kilitli bir konteynerde salt okunur
+  bağlanıp `node` ile çalışır (`proxyImage`, varsayılan `node:22-alpine`; `pull: never` kuralı onun için de geçerli).
+- Proxy bir bağlantıyı yalnızca host **ve** port listede ise ve isim yalnızca genel (public) adreslere çözülüyorsa açar;
+  kontrol ettiği adrese bağlanır, ikinci bir DNS sorgusu yapmaz. Özel ağ, loopback, link-local (bulut metadata adresi
+  `169.254.169.254`), CGNAT ve bunların IPv6 karşılıkları reddedilir; listede elle yazılmış bir IP aynen kabul edilir.
+  `*.alan.com` alt alan adlarını kapsar, `alan.com`'un kendisini kapsamaz. Yalnızca HTTPS (CONNECT) geçer; düz HTTP reddedilir.
+- Sunucuya `HTTPS_PROXY`/`HTTP_PROXY` (ve Node için `NODE_USE_ENV_PROXY=1`) verilir. Bu değişkenleri yok sayan bir
+  sunucunun ağı yoktur, yani zorlama değişkenlerle değil ağ düzeniyle yapılır.
+- Her izin verilen ve reddedilen bağlantı audit log'a yazılır (`method: egress`, `tool: host:port`; ret `block`, izin
+  `info`). Sunucu ismi kendisi seçtiği için aynı host, port ve karar dakikada en fazla bir kez, hepsi birlikte dakikada en
+  fazla 30 kez yazılır; tutulanlar sayı olarak bildirilir (bir sonraki kayıtta ve tek bir özet satırında).
+- Proxy oturum ortasında durursa sunucunun ağı tamamen kesilir ve audit log'a uyarı düşer; açık ağa geri dönülmez.
+  Proxy hazır olmadan sunucu başlatılmaz.
+- `network` ile birlikte kullanılamaz (politika hata verir). Açıkken `HTTPS_PROXY` gibi değişkenler `sandbox.env` ile
+  geçirilemez (egress yokken geçirilebilir). Proxy image'ı sunucu kodu sabitlemesine dahildir: değişen proxy image'ı,
+  değişen sunucu kodu gibi `initialize` anında kesilir. Bu yüzden zaten sabitlenmiş bir sandbox'lı sunucuya `egress`
+  eklediğinizde ilk başlatmada kesilir; `mcp-firewall pins approve` ile onaylayın.
+- Firewall sert öldürülürse konteynerler bir dakika içinde kendiliğinden kapanır, ağ kalır; firewall'un bıraktığı, beş
+  dakikadan eski ve boş ağlar egress'li bir sonraki başlatmada silinir.
+
+`mcp-firewall sandbox show` ağ, proxy ve sunucu için çalıştırılacak dört komutu gösterir.
+
+Windows'ta Docker Desktop ile uçtan uca denendi (14.11.2026): izinli host'lar geçti; listede olmayan host, yanlış port,
+IP literal, wildcard'ın kapsamadığı ana alan, `127.0.0.1` ve `10.0.0.1`'e çözülen izinli isimler ve `host.docker.internal`
+proxy'de reddedildi; proxy'yi atlayan doğrudan bağlantı ve DNS sorgusu hiç çıkamadı.
+
 **Sınırları:** Bu Docker'ın kendi yalıtımıdır (Windows ve macOS'ta Docker Desktop'ın VM'i içinde), donanım sanallaştırması değildir;
 çekirdek ya da Docker açığı konteynerden kaçırabilir. `network: bridge` verdiğinizde sunucunun kendi ağ bağlantısı yine görünmezdir:
-postmark-mcp türü bir sunucu, izin verdiğiniz API'ye kötü niyetli istek atmaya devam eder (Docker adres bazlı izin listesi sunmaz; bunun
-için kendi Docker ağınızda bir çıkış proxy'si gerekir). `bridge` ağındaki konteyner, Docker Desktop'ta makinenin yalnızca `127.0.0.1`'e bağlı
+postmark-mcp türü bir sunucu, izin verdiğiniz API'ye kötü niyetli istek atmaya devam eder; `egress` ile hedefleri daraltabilirsiniz,
+ama izinli hedefe giden kötü niyetli istek (ör. izinli e-posta API'siyle saldırgana mail) ve aynı CDN'deki başka bir siteye
+izinli isimle gidip başka host isteyen "domain fronting" yine engellenmez; proxy TLS'i açmaz. `bridge` ağındaki konteyner, Docker Desktop'ta makinenin yalnızca `127.0.0.1`'e bağlı
 servislerine de `host.docker.internal` üzerinden ulaşır (Windows'ta bir yerel HTTP servisiyle denendi; `none` iken ulaşamadı): firewall'un
 paneli, yerel veritabanları ve SIEM uç noktası dahil, makinenizdeki yerel servisler o sunucuya açık olur. Ağı gerçekten gereken sunuculara verin.
 Bağladığınız klasördeki veri sunucuya açıktır: dar tutun, mümkünse salt okunur bırakın.
@@ -339,6 +383,8 @@ Uzak sunucular (`gateway`) için geçerli değildir. Yalnızca Windows'ta Docker
 | `src/dlp.ts` | Secret/PII dedektörleri (Luhn ve TCKN checksum doğrulamalı) |
 | `src/pinning.ts` | Tool tanımı, sunucu kodu ve prompt şablonu pinleri, onay bekleyenler, sunucular arası ad çakışması |
 | `src/codepin.ts` | Sunucu kodunu bulma (npx önbelleği, uv/pipx ortamları, yerel script) ve hash'leme |
+| `src/egress.ts`, `src/egress-main.ts` | Sandbox çıkış izin listesi: kural ayrıştırma, adres kontrolü, CONNECT proxy'si (proxy konteynerinde çalışır) |
+| `src/egress-throttle.ts` | Egress kararlarının audit log'a yazılma sınırı |
 | `src/sandbox.ts` | Sunucuyu kilitli Docker konteynerinde başlatma: `docker run` komutu üretimi, bağlama denetimi, image kimliği (kod pini), konteyneri durdurma |
 | `src/decode.ts` | Metin içindeki kodlanmış parçaları çözme ve karakter düzeyinde gizlemeyi geri alma |
 | `src/audit.ts` | JSONL audit log |
@@ -1116,8 +1162,8 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
    İngilizce görev talimatları soup04-ab4'te %53), dış Türkçe setlerdeki
    düşük isabet (%48–65) ve rol istemlerindeki yanlış alarm (`prompts/get`'te model artık yalnızca uyarıyor; değişen
    şablonu sabitleme engelliyor). ROT13 ve kelimeleri parçalara bölen saldırılar 01.11.2026'da kapatıldı
-8. Sunucu sandbox'ı (Docker) — yapıldı (08.11.2026, yukarıda "Sandbox (Docker)"). Kalanlar: adres bazlı çıkış izin listesi
-   (iç Docker ağı + proxy), sürümü sabit paketle image kuran bir `sandbox build` yardımcısı, Podman
+8. Sunucu sandbox'ı (Docker) — yapıldı (08.11.2026, yukarıda "Sandbox (Docker)"); çıkış izin listesi `egress` (14.11.2026).
+   Kalanlar: sürümü sabit paketle image kuran bir `sandbox build` yardımcısı, Podman
 
 ## Lisans
 

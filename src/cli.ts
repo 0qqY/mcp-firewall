@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import type { ChildProcess } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import spawn from 'cross-spawn';
 import { AuditLog } from './audit.js';
 import { openSinks } from './siem.js';
@@ -17,15 +19,20 @@ import { loadPolicy, PolicyError, type Policy } from './policy.js';
 import { FirewallProxy } from './proxy.js';
 import {
   buildSandboxCommand,
+  connectEgressProxy,
+  createEgressNetwork,
   describeSandbox,
+  type EgressLaunch,
   formatLaunch,
   isImageRef,
   killContainer,
   preflight,
+  removeEgress,
   sandboxFingerprint,
   SandboxError,
   type SandboxLaunch,
 } from './sandbox.js';
+import { EgressThrottle } from './egress-throttle.js';
 import { TaintTracker } from './taint.js';
 
 const USAGE = `Usage: mcp-firewall [--policy <file>] [--name <server-id>] [--code <path>]... [--sandbox <image>] -- <command> [args...]
@@ -114,7 +121,16 @@ function runSandbox(argv: string[]): void {
   if (!policy.sandbox.enabled) throw new UsageError('the sandbox is off: pass --sandbox <image>, or set sandbox.enabled and sandbox.image in the policy');
   const serverId = options.name ?? [options.command, ...options.args].join(' ');
   const launch = buildSandboxCommand(policy.sandbox, { command: options.command, args: options.args }, { serverId });
-  process.stdout.write(`${describeSandbox(policy.sandbox)}\n\n${formatLaunch(launch)}\n\n`);
+  if (launch.egress) {
+    const e = launch.egress;
+    process.stdout.write(
+      `${describeSandbox(policy.sandbox)}\n\n` +
+        `docker network create --internal --label mcp-firewall=1 ${e.network}\n` +
+        `${formatLaunch(e.proxy)}\n` +
+        `docker network connect ${e.network} ${e.proxy.container}\n` +
+        `${formatLaunch(launch)}\n\n`,
+    );
+  } else process.stdout.write(`${describeSandbox(policy.sandbox)}\n\n${formatLaunch(launch)}\n\n`);
   try {
     const id = preflight(policy.sandbox);
     process.stdout.write(id ? `image is present: ${id}\n` : `image is not present locally; Docker will pull it at start (sandbox.pull: ${policy.sandbox.pull})\n`);
@@ -245,6 +261,67 @@ function classifierLoaders(policy: Policy, audit: AuditLog, onFail: () => void):
 }
 
 /** `Name: value` with \${VAR} replaced from the environment; a missing variable is an error, not an empty credential. */
+/**
+ * Starts the egress proxy container and resolves once it listens and sits on the server's internal network.
+ * Its decision lines go to the audit log through `EgressThrottle` (the server picks the host names, so it must not
+ * be able to flood the log).
+ */
+function startEgressProxy(egress: EgressLaunch, audit: AuditLog, stopping: () => boolean): Promise<ChildProcess> {
+  createEgressNetwork(egress);
+  const proxy = spawn(egress.proxy.command, egress.proxy.args, { stdio: ['pipe', 'pipe', 'pipe'] });
+  const throttle = new EgressThrottle();
+  let ready = false;
+  return new Promise((resolveReady, reject) => {
+    const timer = setTimeout(() => reject(new SandboxError('sandbox.egress: the proxy did not start within 30 seconds')), 30_000);
+    let stderr = '';
+    proxy.stderr!.on('data', (d: Buffer) => {
+      stderr = (stderr + d.toString('utf8')).slice(-2000);
+    });
+    proxy.on('error', (err) => {
+      clearTimeout(timer);
+      reject(new SandboxError(`sandbox.egress: cannot start the proxy: ${err.message}`));
+    });
+    proxy.on('exit', (code) => {
+      clearTimeout(timer);
+      if (!ready) reject(new SandboxError(`sandbox.egress: the proxy exited (${code}) before it was ready: ${stderr.trim().split('\n').slice(-1)[0] ?? ''}`));
+      // Fails closed: without the proxy the server's internal network has no exit at all.
+      else if (!stopping()) audit.record({ verdict: 'warn', method: 'egress', reason: `egress proxy stopped (exit ${code}); the server has no network now` });
+    });
+    createInterface({ input: proxy.stdout! }).on('line', (line) => {
+      let msg: { ready?: number; egress?: 'allow' | 'deny'; host?: string; port?: number; reason?: string };
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (msg.ready !== undefined && !ready) {
+        try {
+          connectEgressProxy(egress);
+        } catch (err) {
+          clearTimeout(timer);
+          reject(err);
+          return;
+        }
+        ready = true;
+        clearTimeout(timer);
+        resolveReady(proxy);
+        return;
+      }
+      if (msg.egress !== 'allow' && msg.egress !== 'deny') return;
+      const host = String(msg.host ?? '?').replace(/[^\x21-\x7e]/g, '?').slice(0, 120);
+      const port = Number(msg.port) || 0;
+      const t = throttle.take(`${msg.egress}|${host}|${port}`, Date.now());
+      if (t.suppressed) audit.record({ verdict: 'warn', method: 'egress', reason: `${t.suppressed} more egress decisions in the last minute were not logged (over the per-minute limit)` });
+      if (!t.write) return;
+      const more = t.more ? ` (+${t.more} more in the last minute)` : '';
+      const reason = msg.egress === 'allow'
+        ? `server connected to ${host}:${port} through the egress proxy${more}`
+        : `server's connection to ${host}:${port} refused: ${String(msg.reason ?? '').slice(0, 200)}${more}`;
+      audit.record({ verdict: msg.egress === 'allow' ? 'info' : 'block', method: 'egress', tool: `${host}:${port}`, reason });
+    });
+  });
+}
+
 function parseHeader(spec: string): [string, string] {
   const colon = spec.indexOf(':');
   if (colon <= 0) throw new UsageError(`--header expects "Name: value", got ${spec}`);
@@ -398,11 +475,30 @@ async function main(): Promise<void> {
   // The proxy calls this once the handshake has been answered.
   const { main: loadClassifier, definition: loadDefinitionClassifier } = classifierLoaders(policy, audit, () => child.kill());
 
+  // With egress, the server starts only once its proxy is up: there is no fallback to an open network.
+  let egressProxy: ChildProcess | undefined;
+  let stopped = false;
+  if (launch?.egress) {
+    try {
+      egressProxy = await startEgressProxy(launch.egress, audit, () => stopped);
+    } catch (err) {
+      removeEgress(launch.egress);
+      process.stderr.write(`mcp-firewall: ${(err as Error).message}\n`);
+      process.exit(1);
+    }
+  }
+
   // stdout belongs to the JSON-RPC stream; server stderr passes straight through for host logs.
   const child = spawn(launch?.command ?? options.command, launch?.args ?? options.args, { stdio: ['pipe', 'pipe', 'inherit'] });
   /** A killed docker client (always the case on Windows) leaves its container running, so stop it by name. */
   const stopContainer = () => {
-    if (launch) killContainer(launch.container);
+    if (!launch || stopped) return;
+    stopped = true;
+    killContainer(launch.container);
+    if (launch.egress) {
+      egressProxy?.stdin?.end();
+      removeEgress(launch.egress);
+    }
   };
   child.on('error', (err) => {
     process.stderr.write(`mcp-firewall: failed to start server: ${err.message}\n`);

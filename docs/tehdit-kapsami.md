@@ -27,7 +27,7 @@ mixraw-ab4-evilsandangels-30 (eşik 0,3; tablodaki ölçümler önceki modellerl
 | El sıkışma yanıtındaki sunucu `instructions` alanı | Evet: zehirliyse alan çıkarılıyor. `initialize`'da 27.10.2026'dan, MCP 2026-07-28'in `server/discover` yanıtında 29.10.2026'dan itibaren; o tarihe kadar bu sürümde talimatlar taranmadan geçiyordu ve sunucu kodu kontrolü çalışmıyordu |
 | `prompts/list`, `resources/list`, `resources/templates/list` açıklamaları | Evet (27.10.2026'dan itibaren): zehirli kayıt gizleniyor |
 | Sunucudan istemciye giden `sampling/createMessage` ve `elicitation/create` içeriği | Evet (27.10.2026'dan itibaren): gizli karakter ve ML; işaretlenen istek sunucuya reddediliyor |
-| Sunucu sürecinin kendi ağ ve dosya erişimi | **Hayır**: firewall yalnızca stdio'yu görüyor. 08.11.2026'dan itibaren `sandbox` açıksa görmüyoruz ama sınırlıyoruz: sunucu kilitli bir Docker konteynerinde çalışıyor (ağ yok, salt okunur kök, yalnızca bağlanan klasörler) |
+| Sunucu sürecinin kendi ağ ve dosya erişimi | **Hayır**: firewall yalnızca stdio'yu görüyor. 08.11.2026'dan itibaren `sandbox` açıksa görmüyoruz ama sınırlıyoruz: sunucu kilitli bir Docker konteynerinde çalışıyor (ağ yok, salt okunur kök, yalnızca bağlanan klasörler). 14.11.2026'dan itibaren `sandbox.egress` ile ağ gereken sunucu yalnızca izin listesindeki hedeflere çıkıyor ve her bağlantı audit log'a yazılıyor |
 
 ## 1. Korunuyoruz
 
@@ -69,7 +69,7 @@ mixraw-ab4-evilsandangels-30 (eşik 0,3; tablodaki ölçümler önceki modellerl
 
 | Saldırı | Örnek | Neden |
 |---|---|---|
-| İlk sürümünden itibaren kötü niyetli sunucu kodu (tedarik zinciri) | Typosquat paketler; postmark-mcp 1.0.16 ile ilk kez kurulan bir sunucu | Sunucu veriyi kendi ağ bağlantısıyla, JSON-RPC dışından gönderiyor. Firewall yalnızca protokol trafiğini görüyor. Kod sabitleme yalnızca *değişikliği* yakalar; ilk kurulan sürüm referans kabul edilir. Sonradan güncellenen paket artık yakalanıyor (aşağıdaki nota bakın). 08.11.2026'dan itibaren `sandbox` (Docker) sunucunun dosya ve ağ erişimini sınırlıyor: `network: none` iken sunucu veriyi dışarı gönderemez ve makinenin dosyalarını okuyamaz. Ağ açıldığında (`bridge`) sunucunun kendi bağlantısı yine görünmez. |
+| İlk sürümünden itibaren kötü niyetli sunucu kodu (tedarik zinciri) | Typosquat paketler; postmark-mcp 1.0.16 ile ilk kez kurulan bir sunucu | Sunucu veriyi kendi ağ bağlantısıyla, JSON-RPC dışından gönderiyor. Firewall yalnızca protokol trafiğini görüyor. Kod sabitleme yalnızca *değişikliği* yakalar; ilk kurulan sürüm referans kabul edilir. Sonradan güncellenen paket artık yakalanıyor (aşağıdaki nota bakın). 08.11.2026'dan itibaren `sandbox` (Docker) sunucunun dosya ve ağ erişimini sınırlıyor: `network: none` iken sunucu veriyi dışarı gönderemez ve makinenin dosyalarını okuyamaz. Ağ açıldığında (`bridge`) sunucunun kendi bağlantısı yine görünmez. 14.11.2026'dan itibaren `sandbox.egress`: sunucu yalnızca listelenen host:port'lara çıkabiliyor (iç Docker ağı + firewall'un proxy'si) ve bağlantıları audit log'a düşüyor; izinli hedefe kötü niyetli istek yine geçer. |
 | Sunucu tarafı açıklar | Anthropic Filesystem MCP "EscapeRoute" CVE-2025-53109/53110 (sembolik bağlantı ve önek atlatma); MCP sunucularında komut enjeksiyonu (OWASP MCP05) | Açık sunucu kodunun içinde çalışıyor. Argüman regex kuralları (`..`, `/etc`, `;`) bir kısmını kesebilir ama varsayılan olarak tanımlı değiller. |
 | İstemci ve aracı yazılım açıkları | mcp-remote CVE-2025-6514 (OAuth `authorization_endpoint` üzerinden komut çalıştırma); MCP Inspector CVE-2025-49596 ve CVE-2025-58444 | OAuth akışı JSON-RPC başlamadan önce, `mcp-remote` sürecinin içinde gerçekleşiyor. |
 | Yapılandırma dosyası saldırıları | Cursor MCPoison CVE-2025-54136; CurXecute CVE-2025-54135; IDE'lerin proje tanımlı MCP sunucularını otomatik çalıştırması (CSA, Temmuz 2026) | Firewall da aynı `mcp.json` içinde tanımlı; saldırgan bu dosyayı değiştirirse firewall'u devreden çıkarabilir veya firewall'suz yeni bir sunucu ekleyebilir. |
@@ -107,7 +107,9 @@ Sınırları: ilk kurulan sürüm referans kabul edildiği için ilk günden kö
 Onlar için sunucuyu sandbox içinde çalıştırmak gerekir. 08.11.2026'dan itibaren `sandbox` var (README: "Sandbox (Docker)"),
 ama ağ ya kapalı ya açık: Docker adres bazlı izin listesi sunmuyor. Sunucunun ağa ihtiyacı yoksa `network: none` ile
 veri sızdırması engellenir; ihtiyacı varsa (ör. e-posta API'si) postmark-mcp türü bir saldırı, izin verilen API'ye
-kötü niyetli istek atmaya devam eder. Bunun için kendi Docker ağınızda çıkış proxy'si gerekir.
+kötü niyetli istek atmaya devam eder. 14.11.2026'dan itibaren `sandbox.egress` hedefleri listeyle daraltıyor (ör. yalnızca
+`api.postmarkapp.com`); izinli API'yi kötüye kullanmak (gizli BCC gibi) yine engellenmez, ama başka bir sunucuya veri
+gönderme engellenir ve her bağlantı audit log'da görünür.
 27.10.2026'dan itibaren `uvx`, `uv tool run` ve `pipx run` ile çalışan Python paketleri de otomatik bulunuyor
 (paketin wheel `RECORD` dosyasındaki dosyalar hash'leniyor). Gerçek kurulumla doğrulandı (uv 0.13.5, Windows,
 `uvx mcp-server-time` 2026.10.19): ilk çalıştırmada uv önbelleğindeki 9 dosya bulunup sabitlendi; ikinci çalıştırma
@@ -131,7 +133,7 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
 | Kod çözücü | `src/decode.ts`, `decoding` | base64/hex/URL/kaçış dizisi/HTML varlığı/ROT13 ile gizlenmiş ya da birleştirilmek üzere parçalara bölünmüş talimatlar ve secret'lar (iç içe 2 seviye); Unicode TAG ve varyasyon seçicisi kaçakçılığıyla saklanan metin (ML ve desenler gizli metni okur); leetspeak, harf aralama, noktalarla bölme, benzer harfler (homoglif), rastgele büyük-küçük harf | Şifrelenmiş metin (ROT13 dışı), ters çevrilmiş metin, dolgu kelimelerle bölünmüş komutlar |
 | Fail-closed proxy | `src/proxy.ts`, `src/jsonrpc.ts` | Bozuk mesajlar, 32 MB üzeri mesajlar, iç hata durumunda trafiğin sızması | — |
 | Dashboard güvenliği | `src/dashboard/server.ts` | Kendi arayüzümüze DNS rebinding ve CSRF | — |
-| Sandbox (Docker) *(08.11.2026'da eklendi)* | `src/sandbox.ts`, `sandbox` | Sunucu sürecinin makinede serbestçe dosya okuması, ağa çıkması ve program başlatması: ağ yok (`none`), salt okunur kök, tüm yetkiler kapalı, root olmayan kullanıcı, kaynak sınırı; kimlik bilgisi klasörleri ve firewall'un kendi dosyaları bağlanamıyor; image'ın içerik kimliğiyle kod sabitleme | Ağ açıkken (`bridge`) sunucunun izinli hedefe kötü niyetli isteği (adres bazlı izin listesi yok); bağlanan klasördeki veri; Docker ve çekirdek açıkları; uzak (gateway) sunucular |
+| Sandbox (Docker) *(08.11.2026'da eklendi)* | `src/sandbox.ts`, `sandbox` | Sunucu sürecinin makinede serbestçe dosya okuması, ağa çıkması ve program başlatması: ağ yok (`none`), salt okunur kök, tüm yetkiler kapalı, root olmayan kullanıcı, kaynak sınırı; kimlik bilgisi klasörleri ve firewall'un kendi dosyaları bağlanamıyor; image'ın içerik kimliğiyle kod sabitleme | İzinli hedefe kötü niyetli istek (`egress` hedefi daraltır, isteğin içeriğini görmez), domain fronting; bağlanan klasördeki veri; Docker ve çekirdek açıkları; uzak (gateway) sunucular |
 
 ## İyileştirmeler
 

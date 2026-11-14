@@ -1037,3 +1037,26 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     satırı 27. Değerlendirme: README false alarm'ı gerçekten düşüyor ama BIPIA, yeni sınıf ve Türkçe dolaylı saldırıda
     recall kaybı var; default DEĞİŞMEDİ (B30). `models/mcp-pi-mmbert-mixraw-ab4-docs-30` ONNX'i (int8 atıldı) yerelde
     duruyor; `bench/bipia/report_bipia.py` raporuna `docs30`, `docs40` eklendi.
+
+111. **Sandbox çıkış izin listesi `sandbox.egress` (14.11.2026):** Yol haritası 8'in kalan işi. Ağ gereken sunucu artık
+    `bridge`'e (tam internet + makinenin yerel servisleri) çıkmak yerine kendine ait bir Docker `--internal` ağında
+    çalışıyor; tek çıkış, aynı ağa bağlanan firewall'un kendi HTTP CONNECT proxy'si (`src/egress.ts`, giriş
+    `src/egress-main.ts`). Proxy ayrı, kilitli bir konteynerde (`proxyImage`, varsayılan `node:22-alpine`, kullanıcının
+    onayıyla indirildi; `cap-drop ALL`, salt okunur, root değil, 128 MB) iki derlenmiş dosyası salt okunur bağlanarak
+    çalışıyor. Kurallar `host[:port]`, `*.alan[:port]`, IP literal; port verilmezse 443; URL, yol ve tek `*` politika
+    yüklenirken reddediliyor. İsim yalnızca genel adreslere çözülürse ve kontrol edilen adrese bağlanılarak (ikinci DNS
+    sorgusu yok) geçiliyor; özel, loopback, link-local, CGNAT, eşlenmiş/NAT64 IPv6 reddediliyor. Yalnızca CONNECT; düz
+    HTTP 405. Kararlar audit log'a `method: egress` ile (ret `block`, izin `info`): aynı host/port/karar dakikada bir,
+    hepsi birlikte dakikada en fazla 30 (`src/egress-throttle.ts`; her seferinde yeni isim deneyen sunucu log'u dolduramaz).
+    Proxy hazır olmadan sunucu başlamıyor; proxy durursa ağ kesiliyor ve uyarı yazılıyor. `network` ile birlikte hata;
+    egress açıkken proxy değişkenleri `sandbox.env`'de yasak (kapalıyken eskisi gibi serbest); proxy image'ı kod sabitlemesine dahil (egress yokken parmak izi eskisiyle
+    aynı); beş dakikadan eski, etiketli, boş ağlar başlangıçta siliniyor. `sandbox show` dört komutu gösteriyor.
+    Önce yapılan deneme (alpine, internal ağ): doğrudan IP, dış DNS, `host.docker.internal`, ağ geçidi ve
+    `192.168.65.254` kapalı; `bridge` kontrolünde host'a ulaşılıyordu. Uçtan uca (`bench/egress/`, gerçek Docker Desktop,
+    yalıtılmış HOME): `example.com` ve `*.github.com` (api.github.com) geçti; wikipedia, example.org, yanlış port,
+    `1.1.1.1` literal, `github.com` (wildcard kapsamaz), `localtest.me` (→127.0.0.1) ve `10.0.0.1.nip.io` reddedildi;
+    proxy'yi atlayan doğrudan bağlantı ENETUNREACH, DNS EAI_AGAIN. Proxy öldürülünce bağlantılar kesildi ve uyarı
+    yazıldı; firewall sert öldürülünce konteynerler bir dakika içinde kapandı, ağ kaldı (elle silindi). Gerçek audit log
+    1940 satır önce/sonra. İki firewall paralel koşturuldu: ikisi de aynı sonucu verdi, biri diğerinin ağını silmedi. Panel
+    egress satırlarını Türkçe gösteriyor (etiketlemeye sunulmuyor: skor ve alıntı yok). 12 yeni test, 261/261. Sınırlar README'de: izinli hedefe kötü niyetli istek, domain fronting,
+    Linux ve Podman denenmedi, GitHub MCP image'ıyla denenmedi. Kurulu kopya yenilenmedi.

@@ -5,8 +5,11 @@ import { parse } from 'yaml';
 import { buildDetectors, type Detector } from './dlp.js';
 import { globToRegExp } from './glob.js';
 import { compilePathPattern, type PathConstraint } from './paths.js';
+import { EgressRuleError, parseEgressRule } from './egress.js';
 import {
+  DEFAULT_PROXY_IMAGE,
   defaultProtectedPaths,
+  EGRESS_RESERVED_ENV,
   hasMountBreaker,
   isContainerPath,
   isEnvName,
@@ -18,6 +21,7 @@ import {
   RESERVED_ENV,
   SANDBOX_DEFAULTS,
   type SandboxConfig,
+  type SandboxEgress,
   type SandboxMount,
 } from './sandbox.js';
 import { SYSLOG_FACILITIES, type SiemConfig } from './siem.js';
@@ -363,7 +367,7 @@ function compileTaint(raw: Obj, baseDir: string): TaintConfig {
   };
 }
 
-const SANDBOX_KEYS = ['enabled', 'image', 'pull', 'network', 'readOnly', 'tmpfsSize', 'user', 'memory', 'cpus', 'pidsLimit', 'mounts', 'env', 'workdir'];
+const SANDBOX_KEYS = ['enabled', 'image', 'pull', 'network', 'readOnly', 'tmpfsSize', 'user', 'memory', 'cpus', 'pidsLimit', 'mounts', 'env', 'workdir', 'egress'];
 
 /**
  * `stateFiles` are the firewall's own files (audit log, pins, taint data, model): a mount that reaches them
@@ -431,6 +435,9 @@ function compileSandbox(raw: unknown, baseDir: string, stateFiles: string[]): Sa
     return { source, target: o.target, readOnly: oneOf(o.mode, ['ro', 'rw'] as const, 'ro', `${path}.mode`) === 'ro' };
   });
 
+  const egress = compileEgress(s.egress, network, s.network !== undefined);
+  for (const name of env) if (egress && EGRESS_RESERVED_ENV.has(name)) throw new PolicyError(`sandbox.env: ${name} is set by the sandbox when egress is on`);
+
   return {
     enabled,
     image,
@@ -446,7 +453,33 @@ function compileSandbox(raw: unknown, baseDir: string, stateFiles: string[]): Sa
     env,
     workdir,
     ...guard,
+    ...(egress ? { egress } : {}),
   };
+}
+
+/** `sandbox.egress`: an allowlist of destinations; the network setting must be left at `none`. */
+function compileEgress(raw: unknown, network: string, networkGiven: boolean): SandboxEgress | undefined {
+  if (raw === undefined) return undefined;
+  const e = obj(raw, 'sandbox.egress');
+  for (const key of Object.keys(e)) if (!['allow', 'proxyImage'].includes(key)) throw new PolicyError(`sandbox.egress.${key}: unknown option`);
+  if (networkGiven && network !== 'none') {
+    throw new PolicyError(`sandbox.egress: cannot be combined with sandbox.network: ${network}; egress puts the server on its own internal network (leave network out or set it to none)`);
+  }
+  const allow = strList(e.allow, 'sandbox.egress.allow') ?? [];
+  if (allow.length === 0) throw new PolicyError('sandbox.egress.allow: list at least one host[:port]; for no network at all, leave egress out (network: none is the default)');
+  const rules = allow.map((spec, i) => {
+    try {
+      return parseEgressRule(spec);
+    } catch (err) {
+      if (err instanceof EgressRuleError) throw new PolicyError(`sandbox.egress.allow[${i}]: ${err.message}`);
+      throw err;
+    }
+  });
+  const proxyImage = e.proxyImage === undefined ? DEFAULT_PROXY_IMAGE : e.proxyImage;
+  if (typeof proxyImage !== 'string' || !isImageRef(proxyImage)) throw new PolicyError(`sandbox.egress.proxyImage: not a valid image reference: ${String(proxyImage)}`);
+  // Normalised form, so the proxy container and the audit log see the same thing the checks used.
+  const canonical = rules.map((r) => `${r.wildcard ? '*.' : ''}${r.host.includes(':') ? `[${r.host}]` : r.host}:${r.port}`);
+  return { allow: canonical, rules, proxyImage };
 }
 
 /** Validates a parsed policy document; relative file paths resolve against `baseDir`. */
