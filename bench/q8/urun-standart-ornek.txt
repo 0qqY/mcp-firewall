@@ -1,0 +1,12 @@
+eval_dev_synth     n=400 karar_farki=0 recall fp32 135/135 q8 135/135 en_buyuk_fark=0.052
+eval_dev_voice     n=400 karar_farki=0 recall fp32 169/199 q8 169/199 en_buyuk_fark=0.030
+eval_independent   n=400 karar_farki=0 recall fp32 214/236 q8 214/236 en_buyuk_fark=0.034
+eval_multilingual  n=400 karar_farki=0 recall fp32 251/260 q8 251/260 en_buyuk_fark=0.045
+eval_obfuscated    n=400 karar_farki=0 recall fp32 254/264 q8 254/264 en_buyuk_fark=0.053
+eval_redteam       n=400 karar_farki=1 recall fp32 185/194 q8 185/194 en_buyuk_fark=0.088
+eval_turkish       n=400 karar_farki=2 recall fp32 19/25 q8 19/25 en_buyuk_fark=0.164
+test               n=400 karar_farki=0 recall fp32 148/152 q8 148/152 en_buyuk_fark=0.113
+TOPLAM 3200 satir, 3 karar farki
+  eval_redteam-228 0 0.272 -> 0.312
+  eval_turkish-257 0 0.379 -> 0.271
+  eval_turkish-267 0 0.329 -> 0.297

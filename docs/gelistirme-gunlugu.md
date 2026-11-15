@@ -1060,3 +1060,21 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     1940 satır önce/sonra. İki firewall paralel koşturuldu: ikisi de aynı sonucu verdi, biri diğerinin ağını silmedi. Panel
     egress satırlarını Türkçe gösteriyor (etiketlemeye sunulmuyor: skor ve alıntı yok). 12 yeni test, 261/261. Sınırlar README'de: izinli hedefe kötü niyetli istek, domain fronting,
     Linux ve Podman denenmedi, GitHub MCP image'ıyla denenmedi. Kurulu kopya yenilenmedi.
+
+112. **Gece turu: q8, seed tekrarı, GitHub egress (15.11.2026):** (1) **q8:** `training/quant_probe.py` ile B30'un
+    int8 varyantları. Yalnız embedding tablosunu int8 yapan graph (611 MB, peak working set 2,7 → 1,6 GB) held-out'ta 333
+    satırda 1, ürün yolundan dış setlerde 7.016 satırda 7, standart setlerden 3.200 satırlık örneklemde 3 karar
+    değiştirdi; 11'i de zararsız satır ve eşiğin yanında, hiçbir sette yakalanan saldırı sayısı değişmedi. Attention/MLP'yi
+    de int8 yapan varyantlar 14-22 karar değiştirdi (eski "int8 atıldı" notları bunlar içindi). Kural "aynı karar" olduğu
+    için default ve install değişmedi; opt-in seçenek olarak sunulabilir, BIPIA/AEB/poligon ve Node'daki gerçek proxy
+    belleği ölçülmedi. Rapor `bench/q8/`. (2) **Seed tekrarı:** B30 tarifi veri değişmeden `--seed 7` ile yeniden koşuldu
+    (aday değil, gürültü ölçümü). held-out 143 → 141, ek parametre 15 → 13, BIPIA recall @%1 FPR 0,247 → 0,237 (ham 0,236
+    → 0,207), BIPIA FPR @0,3 0,209 → 0,428, Türkçe README false alarm %20,7 → 17,3, HF Türkçe %11,0 → 7,8. docs-30'un
+    held-out kaybı ve HF Türkçe kazancı gürültünün içinde; BIPIA kaybı ve README kazancı gürültüden büyük. Sabit eşikteki
+    kalibrasyon seed'le çok oynadığı için adaylar eşit FPR'de karşılaştırılmalı ve her tarif en az iki seed ile koşulmalı.
+    Rapor `bench/heldout/seed-tekrari.md`. Gece için önerilen "eşli README" tarifi docs turunda zaten vardı (her pencerenin
+    saldırılı ikizi), bu yüzden yerine seed tekrarı yapıldı; README indirme onayı kullanılmadı. (3) **GitHub egress:**
+    gerçek `github-mcp-server:v2.0.3` image'ı `sandbox.egress` ile (`bench/egress/drive-github.mjs`, izole HOME): izin
+    listesinde `api.github.com` varken 46 tool, `get_me` ve `search_repositories` çalıştı, tek bağlantı api.github.com:443;
+    yalnız `example.com` varken iki çağrı da "Forbidden by egress allowlist" döndü, audit'e `block` yazıldı. Gerçek audit log
+    bu testlerden satır almadı. README'deki "denenmedi" notu güncellendi.

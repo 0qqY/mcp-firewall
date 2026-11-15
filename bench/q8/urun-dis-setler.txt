@@ -1,0 +1,15 @@
+ek-                n=   74 karar_farki=  0 fp32_isaret=  15 q8_isaret=  15 en_buyuk_fark=0.018
+en_control         n=  300 karar_farki=  0 fp32_isaret=  22 q8_isaret=  22 en_buyuk_fark=0.058
+probes_wrapped     n=   17 karar_farki=  0 fp32_isaret=  10 q8_isaret=  10 en_buyuk_fark=0.000
+real_tools_sample  n= 3000 karar_farki=  0 fp32_isaret=  29 q8_isaret=  29 en_buyuk_fark=0.074
+tr_false_alarm     n= 2875 karar_farki=  6 fp32_isaret= 316 q8_isaret= 314 en_buyuk_fark=0.164
+tr_real_issues     n=  150 karar_farki=  0 fp32_isaret=  12 q8_isaret=  12 en_buyuk_fark=0.043
+tr_real_tools      n=  600 karar_farki=  1 fp32_isaret=  46 q8_isaret=  47 en_buyuk_fark=0.033
+TOPLAM 7016 satir, 7 karar farki
+  tr_false_alarm-XR-fa02095 0 fp32=0.340 q8=0.286
+  tr_false_alarm-XR-fa02175 0 fp32=0.293 q8=0.312
+  tr_false_alarm-XR-fa02192 0 fp32=0.329 q8=0.297
+  tr_false_alarm-XR-fa02396 0 fp32=0.352 q8=0.286
+  tr_false_alarm-XR-fa02576 0 fp32=0.379 q8=0.271
+  tr_false_alarm-XR-fa02599 0 fp32=0.287 q8=0.326
+  tr_real_tools-TRR-readme-0022 0 fp32=0.273 q8=0.305

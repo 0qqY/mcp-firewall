@@ -1,0 +1,9 @@
+set | n | B30 isaret | seed7 isaret | saldiri satiri
+ek-                           74    15 (20.3%)    13 (17.6%) 37
+en_control                   300    22 (7.3%)    29 (9.7%) 0
+probes_wrapped                17    10 (58.8%)    10 (58.8%) 10
+real_tools_sample           3000    29 (1.0%)    24 (0.8%) 0
+tr_false_alarm              2875   316 (11.0%)   224 (7.8%) 0
+tr_real_issues               150    12 (8.0%)    10 (6.7%) 0
+tr_real_tools                450    15 (3.3%)    14 (3.1%) 0
+tr_real_tools-TRR-readme     150    31 (20.7%)    26 (17.3%) 0

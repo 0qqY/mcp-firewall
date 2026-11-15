@@ -328,7 +328,7 @@ sandbox:
   image: ghcr.io/github/github-mcp-server:v2.0.3
   env: [GITHUB_PERSONAL_ACCESS_TOKEN]
   egress:
-    allow: [api.github.com, "*.githubusercontent.com"]   # host[:port], port verilmezse 443 (örnek; GitHub image'ıyla denenmedi)
+    allow: [api.github.com, "*.githubusercontent.com"]   # host[:port], port verilmezse 443 (GitHub image'ıyla denendi, 15.11.2026)
 ```
 
 - Sunucu konteyneri kendine ait bir Docker `--internal` ağına konur: o ağdan hiçbir yere yol yoktur (doğrudan IP, DNS,
@@ -357,7 +357,11 @@ sandbox:
 
 Windows'ta Docker Desktop ile uçtan uca denendi (14.11.2026): izinli host'lar geçti; listede olmayan host, yanlış port,
 IP literal, wildcard'ın kapsamadığı ana alan, `127.0.0.1` ve `10.0.0.1`'e çözülen izinli isimler ve `host.docker.internal`
-proxy'de reddedildi; proxy'yi atlayan doğrudan bağlantı ve DNS sorgusu hiç çıkamadı.
+proxy'de reddedildi; proxy'yi atlayan doğrudan bağlantı ve DNS sorgusu hiç çıkamadı. Gerçek GitHub MCP sunucusuyla
+(15.11.2026, `ghcr.io/github/github-mcp-server:v2.0.3`, yalnız okuma çağrıları, [bench/egress/drive-github.mjs](bench/egress/drive-github.mjs)):
+yukarıdaki listeyle 46 tool geldi, `get_me` ve `search_repositories` çalıştı, tek bağlantı `api.github.com:443` oldu.
+Listede yalnız `example.com` varken iki çağrı da sunucudan "Forbidden by egress allowlist" hatasıyla döndü ve audit log'a
+`block` satırı yazıldı. Sunucu Go ile yazılmış; proxy değişkenlerini kendiliğinden kullanıyor.
 
 **Sınırları:** Bu Docker'ın kendi yalıtımıdır (Windows ve macOS'ta Docker Desktop'ın VM'i içinde), donanım sanallaştırması değildir;
 çekirdek ya da Docker açığı konteynerden kaçırabilir. `network: bridge` verdiğinizde sunucunun kendi ağ bağlantısı yine görünmezdir:

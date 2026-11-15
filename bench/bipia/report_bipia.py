@@ -53,8 +53,8 @@ def row(name, p, ship=None):
 
 
 results = []
-SHIP = {"B30": 0.3, "ab4lab30": 0.9, "soup04ab4": 0.9, "gap40": 0.3, "gap2_30": 0.3, "tri_g250_50": 0.3, "docs30": 0.3, "docs40": 0.3}  # thresholds each model shipped / was recommended with
-for tag in ("B30", "ab4lab30", "soup04ab4", "gap40", "gap2_30", "tri_g250_50", "docs30", "docs40"):
+SHIP = {"B30": 0.3, "ab4lab30": 0.9, "soup04ab4": 0.9, "gap40": 0.3, "gap2_30": 0.3, "tri_g250_50": 0.3, "docs30": 0.3, "docs40": 0.3, "B30s7": 0.3}  # thresholds each model shipped / was recommended with
+for tag in ("B30", "ab4lab30", "soup04ab4", "gap40", "gap2_30", "tri_g250_50", "docs30", "docs40", "B30s7"):
     f = B / "scores" / f"{tag}.npz"
     if not f.exists():
         continue
