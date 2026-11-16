@@ -1129,3 +1129,21 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     sunucu, repo build'i): 1 milyon satırlık sentetik hosts listesi + `example.org` → `www.example.org` ve listedeki bir ad
     sunucuya gitmeden reddedildi, `example.com` içeriği geldi; liste yükleme 1,9 s / ~270 MB; gerçek audit log satır almadı.
     Gerçek URLhaus listesi indirilmedi. Install yenilenmedi.
+
+117. **Güvenlik açığı turu (16.11.2026, ~1 saat):** Kapsam: policy atlatma, DLP/decoding, protokol/parser, sandbox. Bulunan
+    ve düzeltilenler: (1) **Cevap id'si eşleşmesi** (4f2d2d6): sunucu `tools/call` 5'in cevabını `"5"`, `" 5"`, `"5.0"`
+    ya da `"0x5"` id'siyle gönderince firewall cevabı bekleyen isteğe eşleyemiyor, DLP/gizli karakter/ML taramasız
+    iletiyordu; TypeScript SDK 1.32.2 istemcisi `Number(response.id)` ile eşleyip kabul ediyor. Sayısal eşdeğer id
+    artık eşleniyor ve isteğin id'sine çevriliyor; bekleyen isteği olmayan cevap (kullanıcı onayı beklenirken sunucunun
+    uydurduğu cevap dahil) enforce modunda düşürülüyor. Aynı commit: task olarak çalışan `tools/call`'un sonucu
+    `tasks/result` / `tasks/get` ile geliyordu ve hiç taranmıyordu; artık taranıyor, taint için taskId → tool eşleniyor.
+    (2) **urlBlocklist yazımları** (42195d5): `http:evil`, `https:/evil`, `https:\evil` (WHATWG bunları açıyor),
+    `good\@evil` (Python urllib host'u @ sonrası sayıyor), iç içe yönlendirme URL'si; listedeki URL'ye `?x=1`, `//`,
+    `%70` eklemek. (3) **DLP JSON sayıları** (59e7a71): kart ve TC kimlik no sayı olarak geçiyordu; yalnız 11 hane ve 3-6
+    ile başlayan 15-16 hane okunuyor (zaman damgası/snowflake yanlış alarmı yok). 6 yeni test, 288/288. Gerçek
+    filesystem ve fetch sunucusu izole HOME ile yeni build arkasında: tools 14 / 1, çağrılar normal, gerçek audit satır
+    almadı. Denenip açık bulunmayanlar: yinelenen JSON anahtarı (mesaj yeniden serileştiriliyor), SDK'nın `method`+`result`
+    karışık mesajı (1.32.2 şemaları strict), `paths` (8.3, `\?\`, ADS, sondaki nokta zaten kapalı). Kalan/denenmeyen:
+    tam genişlikli (ｇｈｐ＿) ya da yüzde kodlu secret DLP'den geçiyor (model seçimli kodlama, sınırsız); tool adında
+    Kiril harf deny kuralını atlatır (yalnız `hiddenUnicode` uyarısı); `completion/complete` ve bildirimler taranmıyor;
+    sandbox/egress denenmedi (Docker Desktop kapalıydı). Install yenilenmedi, push yok.
