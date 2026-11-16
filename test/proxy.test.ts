@@ -283,3 +283,48 @@ test('a tool hidden from tools/list cannot be called by name either', async () =
   p.toServer(call(8, 'add', {}));
   assert.equal((await p.atServer.next()).id, 8);
 });
+
+const GH_TOKEN = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8';
+const secretResult = (id: unknown) => ({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `token ${GH_TOKEN}` }] } });
+
+test('a response id spelled differently from the request is still matched and scanned', async () => {
+  // The TypeScript SDK client looks responses up by Number(id), so these all answer request 5 there.
+  for (const spelled of ['5', ' 5', '5.0', '0x5']) {
+    const h = harness({ ...BASE, dlp: { enabled: true, action: 'redact' } });
+    h.toServer(call(5, 'read', {}));
+    await h.atServer.next();
+    h.toClient(secretResult(spelled));
+    const reply = await h.atClient.next();
+    assert.equal(reply.id, 5, spelled);
+    assert.doesNotMatch(JSON.stringify(reply), new RegExp(GH_TOKEN), spelled);
+  }
+});
+
+test('a response to no pending request is dropped, including one for a call awaiting approval', async () => {
+  const h = harness({ ...BASE, tools: { rules: [{ match: 'send_*', action: 'ask' }] } });
+  h.toServer({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { capabilities: { elicitation: {} } } });
+  await h.atServer.next();
+  h.toServer(call(9, 'send_mail', { to: 'a@example.com' }));
+  const prompt = await h.atClient.next();
+  assert.equal(prompt.method, 'elicitation/create');
+  // The server never saw call 9, yet answers it with a forged result while the user is still deciding.
+  h.toClient(secretResult(9));
+  h.toClient(secretResult(42));
+  await tick();
+  assert.equal(h.atClient.buffered, 0);
+});
+
+test('the result of a task-augmented tools/call is scanned when the client reads the task', async () => {
+  const h = harness({ ...BASE, dlp: { enabled: true, action: 'redact' } });
+  h.toServer({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'read', arguments: {}, task: { ttl: 60000 } } });
+  await h.atServer.next();
+  h.toClient({ jsonrpc: '2.0', id: 1, result: { task: { taskId: 't-1', status: 'working' } } });
+  await h.atClient.next();
+  for (const method of ['tasks/result', 'tasks/get']) {
+    h.toServer({ jsonrpc: '2.0', id: method, method, params: { taskId: 't-1' } });
+    await h.atServer.next();
+    h.toClient(secretResult(method));
+    const reply = await h.atClient.next();
+    assert.doesNotMatch(JSON.stringify(reply), new RegExp(GH_TOKEN), method);
+  }
+});

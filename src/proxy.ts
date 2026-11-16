@@ -34,8 +34,15 @@ import type { Policy } from './policy.js';
 import { TaintTracker } from './taint.js';
 import { findBlockedUrl } from './urlblock.js';
 
-/** Response types whose payload reaches the model and is therefore scanned. */
-const SCANNED_RESULTS = new Set(['tools/call', 'resources/read', 'prompts/get']);
+/**
+ * Response types whose payload reaches the model and is therefore scanned. A task-augmented `tools/call` answers with
+ * a task handle only; the tool's real result comes later from `tasks/result` (or inline in `tasks/get`).
+ */
+const SCANNED_RESULTS = new Set(['tools/call', 'resources/read', 'prompts/get', 'tasks/result', 'tasks/get']);
+/** Methods that read a task's outcome: they carry the result of the tool call that started the task. */
+const TASK_READS = new Set(['tasks/result', 'tasks/get']);
+/** Task handles remembered per session (taskId -> tool), oldest dropped first. */
+const MAX_TASKS = 1000;
 
 /** List responses whose entries (name, description, schema) the model reads, keyed to the array that holds them. */
 const DEFINITION_LISTS: Record<string, string> = {
@@ -160,6 +167,8 @@ export class FirewallProxy {
   private readonly approvals = new Map<string, (reply: JsonRpcMessage | undefined) => void>();
   /** Tools the user allowed for the rest of the session. */
   private readonly approvedTools = new Set<string>();
+  /** The tool behind each task a task-augmented tools/call started, so its result is scanned and labelled as that tool's. */
+  private readonly taskTools = new Map<string, string>();
 
   constructor(
     private readonly policy: Policy,
@@ -282,6 +291,8 @@ export class FirewallProxy {
             send(this.io.clientOut, errorResponse(msg.id, badUrl));
             return;
           }
+        } else if (TASK_READS.has(msg.method) && isObject(msg.params) && typeof msg.params.taskId === 'string') {
+          request.tool = this.taskTools.get(msg.params.taskId);
         } else if (msg.method === 'prompts/get' && isObject(msg.params) && typeof msg.params.name === 'string') {
           request.tool = msg.params.name;
           request.args = promptArguments(msg.params.arguments);
@@ -484,14 +495,28 @@ export class FirewallProxy {
         this.audit.record({ direction, method: msg.method, verdict: 'allow' });
       }
     } else if (isResponse(msg)) {
-      const request = this.pending.get(idKey(msg.id));
-      this.pending.delete(idKey(msg.id));
+      const key = this.pendingKey(msg);
+      if (key === undefined) {
+        // An answer to nothing the firewall forwarded: a request still waiting for the user's approval, one the
+        // firewall refused, or an id written so that the firewall cannot match it while the client still does.
+        // Forwarded, it would reach the model unscanned.
+        if (this.violation({ direction }, `response to no pending request dropped (id ${JSON.stringify(msg.id)})`)) return;
+        send(this.io.clientOut, msg);
+        return;
+      }
+      const request = this.pending.get(key);
+      this.pending.delete(key);
+      msg.id = JSON.parse(key) as JsonRpcId;
       handshake = request !== undefined && HANDSHAKES.has(request.method);
       if (request && isObject(msg.result)) {
         if (request.method === 'tools/list') msg.result = await this.filterToolsList(msg.result);
         else if (request.method in DEFINITION_LISTS) msg.result = await this.filterDefinitions(msg.result, request.method);
         else if (handshake) msg.result = await this.inspectInstructions(msg.result, request.method);
         else if (SCANNED_RESULTS.has(request.method)) msg = await this.inspectResult(msg, request);
+        if (request.method === 'tools/call' && isObject(msg.result) && isObject(msg.result.task) && typeof msg.result.task.taskId === 'string') {
+          this.taskTools.set(msg.result.task.taskId, request.tool ?? '');
+          if (this.taskTools.size > MAX_TASKS) this.taskTools.delete(this.taskTools.keys().next().value!);
+        }
       } else if (request && msg.error !== undefined) {
         msg = await this.inspectError(msg, request);
       }
@@ -499,6 +524,24 @@ export class FirewallProxy {
     send(this.io.clientOut, msg);
     // A client probing the protocol version stops waiting after a while, so the model loads only now.
     if (handshake && this.classifier) setImmediate(() => void this.loadModel().catch(() => undefined));
+  }
+
+  /**
+   * The pending request a response answers. Clients do not all match ids exactly: the TypeScript SDK looks a response
+   * up by `Number(response.id)`, so `"5"`, `" 5"`, `"5.0"` and `"0x5"` all answer request 5 there. Such a spelling is
+   * matched the same way here (and the id rewritten to the request's), so the result is scanned like any other.
+   */
+  private pendingKey(msg: JsonRpcMessage): string | undefined {
+    const exact = idKey(msg.id);
+    if (this.pending.has(exact)) return exact;
+    const id = msg.id;
+    const n = typeof id === 'string' && id.trim() !== '' ? Number(id) : typeof id === 'number' ? id : NaN;
+    if (Number.isNaN(n)) return undefined;
+    for (const key of this.pending.keys()) {
+      const original = JSON.parse(key) as JsonRpcId;
+      if (typeof original === 'number' ? original === n : typeof original === 'string' && original.trim() !== '' && Number(original) === n) return key;
+    }
+    return undefined;
   }
 
   /** Answers every request the client still waits on, so a blocked server leaves none of them hanging. */
@@ -588,8 +631,8 @@ export class FirewallProxy {
 
   private async inspectResult(msg: JsonRpcMessage, request: PendingRequest): Promise<JsonRpcMessage> {
     const ctx: Context = { direction: 'server->client', method: request.method, tool: request.tool };
-    const refuse = (reason: string) =>
-      request.method === 'tools/call' ? toolErrorResponse(msg.id, reason) : errorResponse(msg.id, reason);
+    const toolResult = request.method === 'tools/call' || request.method === 'tasks/result';
+    const refuse = (reason: string) => (toolResult ? toolErrorResponse(msg.id, reason) : errorResponse(msg.id, reason));
     const { dlp, ml, descriptionScan } = this.policy;
 
     const isPrompt = request.method === 'prompts/get';
@@ -628,7 +671,7 @@ export class FirewallProxy {
     }
 
     // Labelled on what the model will actually read, after redaction.
-    if (this.taint && request.method === 'tools/call') {
+    if (this.taint && (request.method === 'tools/call' || (TASK_READS.has(request.method) && request.tool))) {
       const labels = this.taint.markResult(request.tool ?? '', msg.result, dlpFound);
       if (labels.length > 0) this.audit.record({ ...ctx, verdict: 'info', reason: `session labelled ${labels.join(', ')} by this result` });
     }
