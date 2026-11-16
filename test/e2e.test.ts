@@ -61,3 +61,29 @@ test('firewall CLI enforces policy against a real stdio server process', async (
   assert.ok(audit.some((e) => e.verdict === 'redact' && e.tool === 'read_file'));
   assert.ok(readFileSync(join(dir, 'mcp-firewall-pins.json'), 'utf8').includes('"mock"'));
 });
+
+test('a delete_* deny rule also catches deleteFile and Delete-File through the real CLI (style-blind deny)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcpfw-e2e-style-'));
+  const policyFile = join(dir, 'policy.yaml');
+  writeFileSync(policyFile, ['mode: enforce', 'tools:', '  rules:', '    - match: "delete_*"', '      action: deny'].join('\n'));
+  const child = spawn(process.execPath, [CLI, '--policy', policyFile, '--name', 'mock-style', '--', process.execPath, MOCK], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, MOCK_STYLE_TOOLS: '1' },
+  });
+  const out = messageReader(child.stdout);
+  const request = (id: number, method: string, params?: object) => send(child.stdin, { jsonrpc: '2.0', id, method, params });
+  request(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+  await out.next();
+  request(2, 'tools/list');
+  const tools = (await out.next()).result.tools.map((t: { name: string }) => t.name);
+  // DELETEFILE has no word boundary to split on, so delete_* cannot catch it (documented; write delete* for that).
+  assert.deepEqual(tools.filter((n: string) => /delete/i.test(n)), ['DELETEFILE']);
+  for (const [id, name] of [[3, 'deleteFile'], [4, 'Delete-File']] as const) {
+    request(id, 'tools/call', { name, arguments: { path: 'a' } });
+    const r = (await out.next()).result;
+    assert.equal(r.isError, true, name);
+    assert.doesNotMatch(r.content[0].text, /deleted/, `${name} reached the server`);
+  }
+  child.stdin.end();
+  await new Promise((resolve) => child.on('exit', resolve));
+});

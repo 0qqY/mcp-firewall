@@ -1101,3 +1101,17 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     kalmadı; ikinci build "already exists" ile durdu. Yalnızca paketin sürümü sabit, bağımlılıklar derleme anında çözülüyor
     (image kimliği sabitlemesi sonradan değişeni yakalıyor). Yapılmayanlar: PyPI/`uvx`, Podman, kurulum script'i gereken
     paketler. Install yenilenmedi.
+
+115. **Tool adı eşleşmesi adlandırma biçimine duyarsız (16.11.2026):** 08.11 boşluk analizinde bulunan açık: `tools.rules` ve
+    `taint` desenleri ham adı büyük-küçük harfe duyarlı test ediyordu; `delete_*` deny kuralı `deleteFile`, `DeleteFile`,
+    `delete-file`, `DELETE_FILE`'ı kaçırıyordu (varsayılan `allow` ile geçiyordu, yeniden üretildi). `src/glob.ts`:
+    `foldToolName` (camelCase ve `-._:/` boşluk sınırları `_`, küçük harf; her adım tek geçişli) ve
+    `restrictiveToolMatcher` (ham **ya da** katlanmış ad eşleşirse); `deny`/`ask` kuralları ile taint kaynak ve
+    çıkışlarında kullanılıyor. `allow` kuralları tam yazımda kaldı (izin listesi sessizce genişlemesin); `methods.deny`
+    ve `paths` değişmedi. Sınırı olmayan `DELETEFILE` hâlâ `delete_*`'a takılmaz (README'de `delete*` önerisi).
+    Mock sunucuya isteğe bağlı üç biçim eklendi; gerçek CLI üzerinden `deleteFile` ve `Delete-File` `tools/list`'ten
+    gizlendi ve çağrıları sunucuya ulaşmadan reddedildi. 4 yeni test, 273/273; ReDoS denetimi (`redos-audit`,
+    `redos-shapes`) 9 glob regex'inde temiz. A/B, mcp-ecosystem'deki 179.942 benzersiz tool adı: `delete_*` kuralı olan
+    politikalarda 2.233 karar `allow → deny`, hiçbir karar izne doğru değişmedi; e-posta örneğinde taint kaynakları
+    (`read_*`, `get_*`, `list_*`, `search_*`) 38.828, çıkışlar 596 ad daha kapsıyor. Kurulu `policy.yaml`'daki 111
+    sabitlenmiş tool adında karar değişmedi (hepsi snake_case). Install yenilenmedi: kurulu kopya hâlâ eski eşleşmede.

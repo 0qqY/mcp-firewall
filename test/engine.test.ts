@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { deepScan } from '../src/dlp.js';
-import { evaluateMethod, evaluateToolCall, hasHiddenChars, parameterNamesText, scanToolDefinition, stripHiddenChars } from '../src/engine.js';
+import { foldToolName, restrictiveToolMatcher } from '../src/glob.js';
+import { evaluateMethod, evaluateToolCall, findToolRule, hasHiddenChars, parameterNamesText, scanToolDefinition, stripHiddenChars } from '../src/engine.js';
 import { approvePending, PinStore, toolPin } from '../src/pinning.js';
 import { compilePolicy, PolicyError } from '../src/policy.js';
 
@@ -216,4 +217,35 @@ test('DLP keeps at most ten masked entries and trims long context', () => {
   assert.equal(masked.length, 10);
   assert.match(masked[0].context, /^…x+ \[REDACTED:aws_access_key\] y+…$/);
   assert.ok(masked[0].context.length < 200);
+});
+
+test('deny and ask rules match other naming styles; allow rules stay exact', () => {
+  const p = compilePolicy({ tools: { default: 'deny', rules: [{ match: 'delete_*', action: 'deny' }, { match: 'send_email', action: 'ask' }, { match: 'read_*', action: 'allow' }] } }, '.');
+  for (const n of ['delete_file', 'deleteFile', 'DeleteFile', 'delete-file', 'DELETE_FILE', 'delete.file']) assert.equal(findToolRule(p, n)?.action, 'deny', n);
+  for (const n of ['sendEmail', 'send-email', 'SEND_EMAIL']) assert.equal(findToolRule(p, n)?.action, 'ask', n);
+  assert.equal(findToolRule(p, 'read_file')?.action, 'allow');
+  assert.equal(findToolRule(p, 'readFile'), undefined, 'an allow-list is not widened');
+  assert.equal(findToolRule(p, 'DELETEFILE'), undefined, 'no boundary to split on');
+});
+
+test('foldToolName unifies naming styles and stays linear on long server-chosen names', () => {
+  assert.equal(foldToolName('deleteFile'), 'delete_file');
+  assert.equal(foldToolName('HTTPRequest'), 'http_request');
+  assert.equal(foldToolName('get-user.byID'), 'get_user_by_id');
+  assert.equal(foldToolName('delete_*'), 'delete_*');
+  assert.equal(foldToolName('*Delete*'), '*delete*');
+  // The exact pattern still wins where folding would lose it: nothing that matched before stops matching.
+  assert.equal(restrictiveToolMatcher('get?ser').test('getUser'), true);
+  const long = 'A'.repeat(200_000) + 'a';
+  const t = Date.now();
+  restrictiveToolMatcher('delete_*').test(long);
+  foldToolName('aA'.repeat(100_000));
+  assert.ok(Date.now() - t < 500, `fold took ${Date.now() - t} ms`);
+});
+
+test('taint sources and sinks match other naming styles too', () => {
+  const p = compilePolicy({ taint: { sources: [{ match: 'read_*' }], sinks: [{ match: 'send_email' }] } }, '.');
+  assert.equal(p.taint.sources[0].match.test('readFile'), true);
+  assert.equal(p.taint.sinks[0].match.test('sendEmail'), true);
+  assert.equal(p.taint.sinks[0].match.test('Send-Email'), true);
 });

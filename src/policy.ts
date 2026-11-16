@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { buildDetectors, type Detector } from './dlp.js';
-import { globToRegExp } from './glob.js';
+import { globToRegExp, type NameMatcher, restrictiveToolMatcher } from './glob.js';
 import { compilePathPattern, type PathConstraint } from './paths.js';
 import { EgressRuleError, parseEgressRule } from './egress.js';
 import {
@@ -38,7 +38,8 @@ export interface ArgumentConstraint {
 
 export interface ToolRule {
   pattern: string;
-  match: RegExp;
+  /** deny and ask rules also match other naming styles of the name (deleteFile for delete_*); allow rules are exact. */
+  match: NameMatcher;
   action: Action;
   reason?: string;
   /** Keyed by top-level argument name; `*` means every string anywhere in the arguments. */
@@ -318,10 +319,11 @@ function compileRule(raw: unknown, path: string, baseDir: string): ToolRule {
       deny: regexList(c.deny, `${path}.arguments.${key}.deny`),
     });
   }
+  const action = oneOf(r.action, ['allow', 'deny', 'ask'] as const, 'deny', `${path}.action`);
   return {
     pattern: r.match,
-    match: globToRegExp(r.match),
-    action: oneOf(r.action, ['allow', 'deny', 'ask'] as const, 'deny', `${path}.action`),
+    match: action === 'allow' ? globToRegExp(r.match) : restrictiveToolMatcher(r.match),
+    action,
     reason: r.reason,
     arguments: args,
     paths: compilePaths(r.paths, baseDir, `${path}.paths`),
@@ -345,12 +347,12 @@ function compileTaint(raw: Obj, baseDir: string): TaintConfig {
   };
   const sources: TaintSource[] = list('sources').map((o, i) => ({
     pattern: o.match as string,
-    match: globToRegExp(o.match as string),
+    match: restrictiveToolMatcher(o.match as string),
     label: label(o.label, 'private', `taint.sources[${i}].label`) || 'private',
   }));
   const sinks: TaintSink[] = list('sinks').map((o, i) => ({
     pattern: o.match as string,
-    match: globToRegExp(o.match as string),
+    match: restrictiveToolMatcher(o.match as string),
     labels: strList(o.labels, `taint.sinks[${i}].labels`) ?? [],
     when: oneOf(o.when, ['content', 'session'] as const, 'content', `taint.sinks[${i}].when`),
   }));

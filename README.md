@@ -118,6 +118,19 @@ ornek http://127.0.0.1:8787/mcp`).
   `--header` ile verin. Kopan SSE akışını sürdürme (`Last-Event-ID`) desteklenmiyor. Sunucu kodu sabitleme uzak
   sunucuda uygulanamaz (kod görünmüyor).
 
+### Tool adı eşleşmesi
+`tools.rules` ve `taint` desenlerinde `*` herhangi bir dizi, `?` tek karakterdir. Tool adını sunucu seçer: aynı silme
+işlemi `delete_file`, `deleteFile`, `DeleteFile`, `delete-file` ya da `DELETE_FILE` olarak gelebilir. Bu yüzden
+kısıtlayan desenler (`deny` ve `ask` kuralları, `taint` kaynakları ve çıkışları) adı yazıldığı gibi **ya da** adlandırma
+biçiminden arındırılmış hâliyle (camelCase ve `-`, `.`, `:`, `/`, boşluk sınırları `_` olur, harfler küçülür) eşler:
+`delete_*` yukarıdakilerin hepsini yakalar (16.11.2026; önceki sürümlerde yalnızca `delete_file` yakalanıyordu).
+`allow` kuralları tam yazımla eşler: bir izin listesini sessizce genişletmemek için `read_*` izni `readFile`'ı kapsamaz,
+`default: deny` ise ona ayrı kural yazın. Sınırı olmayan adlar (`DELETEFILE`, `deletefile`) bölünemez; onlar için
+`delete*` yazın. Yöntem adları (`methods.deny`) ve yollar (`paths`) bundan etkilenmez.
+Gerçek ekosistemden 179.942 tool adıyla karşılaştırıldı: `delete_*` kuralı 2.233 ada daha `deny` verdi (`DeleteBucket`,
+`DELETE_TWEET` gibi), hiçbir kararın yönü izne doğru değişmedi; kurulu politikalardaki 111 sabitlenmiş tool adının
+hiçbirinde karar değişmedi.
+
 ### Yol kısıtı (`paths`)
 Regex ile yol denetimi kolay atlatılır: `..\`, `%2e%2e/`, `file:///`, `C:\PROGRA~1`, `secret.env.` ya da izinli
 dizindeki bir junction aynı dosyaya farklı yazımlarla ulaşır. `paths` bloğu her değeri önce dosya sisteminin

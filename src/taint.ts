@@ -2,17 +2,18 @@ import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { decodeEmbedded, deobfuscate, stripInvisible } from './decode.js';
+import type { NameMatcher } from './glob.js';
 import { extractKeys, extractMessageText, extractText } from './ml/classifier.js';
 
 export interface TaintSource {
   pattern: string;
-  match: RegExp;
+  match: NameMatcher;
   label: string;
 }
 
 export interface TaintSink {
   pattern: string;
-  match: RegExp;
+  match: NameMatcher;
   /** Labels this sink refuses; empty means every label. */
   labels: string[];
   /** content: only when the arguments carry text a source returned | session: any call once the label is set. */
