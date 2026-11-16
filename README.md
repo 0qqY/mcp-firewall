@@ -283,7 +283,7 @@ yakalayamazsınız. `sandbox` açıkken sunucu makinede değil, kilitli bir Dock
 # dosya.yaml (sunucu başına ayrı politika dosyası: image, ağ ve klasörler her sunucuda farklıdır)
 sandbox:
   enabled: true
-  image: mcp-dosya-sunucusu:2.2.0        # "--" sonrasındaki komut bu image'ın İÇİNDE çalışır
+  image: mcp-modelcontextprotocol-server-filesystem:2.2.0   # sandbox build ile (aşağıda); "--" sonrasındaki komut bu image'ın İÇİNDE çalışır
   mounts:
     - { source: C:/projeler/site, target: /workspace, mode: ro }
 ```
@@ -294,20 +294,31 @@ sandbox:
 ```
 
 ```bash
-mcp-firewall --policy dosya.yaml --sandbox mcp-dosya-sunucusu:2.2.0 -- mcp-server-filesystem /workspace   # politikada sandbox yazmadan açmak
+mcp-firewall --policy dosya.yaml --sandbox mcp-modelcontextprotocol-server-filesystem:2.2.0 -- mcp-server-filesystem /workspace   # politikada sandbox yazmadan açmak
 mcp-firewall sandbox show --policy dosya.yaml -- mcp-server-filesystem /workspace   # hiçbir şey başlatmadan docker komutunu gösterir, Docker ve image'ı kontrol eder
 ```
 
 - `--` sonrasındaki komut konteynerin içinde çalışır (`--entrypoint`); image'ın kendi entrypoint'i yok sayılır, komut image'da bulunmalıdır.
-- `network: none` iken sunucu çalışırken paket indiremez: `npx -y paket` çalışmaz. Paketi sürümüyle image'a kurun:
+- `network: none` iken sunucu çalışırken paket indiremez: `npx -y paket` çalışmaz. Paketi sürümüyle image'a kurun.
+  npm paketleri için bunu `sandbox build` yapar (16.11.2026):
 
-  ```dockerfile
-  FROM node:22-alpine
-  ARG VERSION
-  RUN npm install -g --ignore-scripts @modelcontextprotocol/server-filesystem@${VERSION}
+  ```bash
+  mcp-firewall sandbox build @modelcontextprotocol/server-filesystem@2.2.0
   ```
 
-  `docker build --build-arg VERSION=2.2.0 -t mcp-dosya-sunucusu:2.2.0 .` (Dockerfile örneği derlenmedi; paketin çalıştırılabilir adı `mcp-server-filesystem`).
+  Paket tam sürümüyle (`2.2.0`; `latest`, `^2.0.0` gibi aralıklar reddedilir) ve kurulum script'leri kapalı
+  (`--ignore-scripts`) `node:22-alpine` üstüne kurulur, image `mcp-modelcontextprotocol-server-filesystem:2.2.0` adını
+  alır. Docker'a yalnızca Dockerfile'ı olan boş bir klasör gönderilir. Bitince image kimliği, paketin çalıştırılabilir
+  adları (`--` sonrasına yazılacak komut; kilitli bir konteynerde image'ın içinden okunur) ve politikaya yazılacak satırlar
+  gösterilir. Aynı adlı image varsa `--force` olmadan üstüne yazmaz. `--tag` başka ad, `--base` başka base image verir;
+  `--print` hiçbir şey derlemeden Dockerfile'ı gösterir (kendi Dockerfile'ınıza başlangıç olarak da kullanılabilir).
+  Sınırları: yalnızca paketin kendi sürümü sabittir; bağımlılık sürümleri ve base image etiketi derleme anında çözülür.
+  Firewall image'ı içerik kimliğiyle sabitlediği için sonradan yeniden derlenen image değişmiş sunucu kodu gibi
+  `initialize` anında kesilir. Kurulum script'i gereken paketler (ör. native modül derleyenler) bu yolla çalışmaz,
+  onlar için kendi Dockerfile'ınızı yazın. Yalnızca npm; PyPI (`uvx`) sunucuları desteklenmez.
+  Denendi (Windows, Docker Desktop): filesystem 2.2.0 image'ı 11 saniyede derlendi (266 MB), firewall üzerinden
+  `network: none` ve salt okunur bir klasörle 16 tool geldi; listeleme ve okuma çalıştı, salt okunur klasöre yazma
+  (`EROFS`) ve klasör dışı okuma reddedildi ([bench/sandbox-build/drive-filesystem.mjs](bench/sandbox-build/drive-filesystem.mjs)).
 - **Sunucu kodu sabitleme** bu modda image'ın içerik kimliğini (`sha256:...`) hash'ler: aynı etiketle yeniden derlenen ya da değiştirilen
   image, değişmiş sunucu kodu gibi `initialize` anında kesilir (`pins approve` ile onaylanır). `image@sha256:...` verirseniz etiket uyarısı da çıkmaz.
 - Ham `docker` bayrağı eklenemez (`extraArgs` yok, bilinmeyen anahtar hata verir): politikadaki bir yazım hatası `--privileged`
@@ -390,6 +401,7 @@ Uzak sunucular (`gateway`) için geçerli değildir. Yalnızca Windows'ta Docker
 | `src/egress.ts`, `src/egress-main.ts` | Sandbox çıkış izin listesi: kural ayrıştırma, adres kontrolü, CONNECT proxy'si (proxy konteynerinde çalışır) |
 | `src/egress-throttle.ts` | Egress kararlarının audit log'a yazılma sınırı |
 | `src/sandbox.ts` | Sunucuyu kilitli Docker konteynerinde başlatma: `docker run` komutu üretimi, bağlama denetimi, image kimliği (kod pini), konteyneri durdurma |
+| `src/sandbox-build.ts` | `sandbox build`: npm paketini tam sürümüyle, kurulum script'leri kapalı image'a kurma; çalıştırılabilir adları kilitli konteynerde okuma |
 | `src/decode.ts` | Metin içindeki kodlanmış parçaları çözme ve karakter düzeyinde gizlemeyi geri alma |
 | `src/audit.ts` | JSONL audit log |
 | `src/siem.ts` | Audit kayıtlarını syslog (UDP/TCP/TLS) ve OTLP/HTTP ile SIEM'e gönderme |
@@ -1182,7 +1194,7 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
    düşük isabet (%48–65) ve rol istemlerindeki yanlış alarm (`prompts/get`'te model artık yalnızca uyarıyor; değişen
    şablonu sabitleme engelliyor). ROT13 ve kelimeleri parçalara bölen saldırılar 01.11.2026'da kapatıldı
 8. Sunucu sandbox'ı (Docker) — yapıldı (08.11.2026, yukarıda "Sandbox (Docker)"); çıkış izin listesi `egress` (14.11.2026).
-   Kalanlar: sürümü sabit paketle image kuran bir `sandbox build` yardımcısı, Podman
+   npm paketinden image kuran `sandbox build` (16.11.2026). Kalanlar: Podman, PyPI (`uvx`) sunucuları için `sandbox build`
 
 ## Lisans
 

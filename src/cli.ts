@@ -32,6 +32,7 @@ import {
   SandboxError,
   type SandboxLaunch,
 } from './sandbox.js';
+import { buildArgs, buildNpmImage, buildSummary, DEFAULT_BUILD_BASE, defaultTag, npmDockerfile, parseNpmSpec } from './sandbox-build.js';
 import { EgressThrottle } from './egress-throttle.js';
 import { TaintTracker } from './taint.js';
 
@@ -43,6 +44,7 @@ const USAGE = `Usage: mcp-firewall [--policy <file>] [--name <server-id>] [--cod
        mcp-firewall pins list [--policy <file>]
        mcp-firewall pins approve --name <server-id> [--policy <file>] [<tool>...]
        mcp-firewall sandbox show [--policy <file>] [--name <server-id>] [--sandbox <image>] -- <command> [args...]
+       mcp-firewall sandbox build <npm-package>@<exact-version> [--tag <image>] [--base <image>] [--print] [--force]
 
 Options:
   --policy <file>   YAML policy file (default: $MCP_FIREWALL_POLICY, else built-in defaults)
@@ -58,6 +60,11 @@ Options:
 
 sandbox show prints the docker command a sandboxed server would be started with and checks that Docker
 and the image are available; it starts nothing.
+
+sandbox build makes an image for sandbox.image: the npm package at that exact version, installed with
+install scripts off on --base (default node:22-alpine), tagged mcp-<package>:<version> unless --tag is
+given. It refuses to replace an existing image without --force. --print shows the Dockerfile and builds
+nothing.
 
 gateway serves a Streamable HTTP MCP endpoint (default http://127.0.0.1:8787/mcp) in front of a remote
 server, with the same policy checks. --header values may name environment variables as \${VAR}, so
@@ -110,6 +117,38 @@ function parseArgs(argv: string[]): CliOptions {
 /** The policy with --sandbox applied: that image, sandbox on, every other sandbox setting from the policy. */
 function withSandboxFlag(policy: Policy, options: CliOptions): Policy {
   return options.sandboxImage ? { ...policy, sandbox: { ...policy.sandbox, enabled: true, image: options.sandboxImage } } : policy;
+}
+
+/** `sandbox build <package>@<version>`: an image with that npm package in it, for `sandbox.image`. */
+async function runSandboxBuild(argv: string[]): Promise<void> {
+  let spec: string | undefined;
+  let tag: string | undefined;
+  let base = DEFAULT_BUILD_BASE;
+  let print = false;
+  let force = false;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--print') print = true;
+    else if (a === '--force') force = true;
+    else if (a === '--tag' || a === '--base') {
+      const value = argv[++i];
+      if (value === undefined) throw new UsageError(`${a} needs a value`);
+      if (!isImageRef(value)) throw new UsageError(`${a}: not a valid image reference: ${value}`);
+      if (a === '--tag') tag = value;
+      else base = value;
+    } else if (a.startsWith('-')) throw new UsageError(`unknown option ${a}`);
+    else if (spec === undefined) spec = a;
+    else throw new UsageError(`sandbox build takes one package, got another: ${a}`);
+  }
+  if (spec === undefined) throw new UsageError('sandbox build needs a package with an exact version, e.g. @modelcontextprotocol/server-filesystem@2.2.0');
+  const pkg = parseNpmSpec(spec);
+  const options = { pkg, tag: tag ?? defaultTag(pkg), base, force };
+  if (print) {
+    process.stdout.write(`${npmDockerfile(pkg, base)}\n# docker ${buildArgs(pkg, options.tag, '<empty folder with this Dockerfile>').join(' ')}\n`);
+    return;
+  }
+  const result = await buildNpmImage(options);
+  process.stdout.write(buildSummary(options, result));
 }
 
 /** `sandbox show`: what a sandboxed server would be started with, and whether Docker and the image are ready. */
@@ -434,7 +473,8 @@ async function main(): Promise<void> {
   }
   if (argv[0] === 'sandbox') {
     try {
-      runSandbox(argv.slice(1));
+      if (argv[1] === 'build') await runSandboxBuild(argv.slice(2));
+      else runSandbox(argv.slice(1));
     } catch (err) {
       process.stderr.write(`mcp-firewall: ${(err as Error).message}\n`);
       if (err instanceof UsageError) process.stderr.write(USAGE);

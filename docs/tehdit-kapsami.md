@@ -265,7 +265,7 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
 **Sıradakiler:**
 
 1. "Görev talimatı" metinlerinde kalan yanlış alarm (Türkçe benchmark %33, iç testte İngilizce %53) ve dış Türkçe setlerdeki düşük isabet (%48–65).
-2. Sandbox'ta adres bazlı çıkış izin listesi (iç Docker ağı + proxy), image'ı sürümü sabit paketle kuran `sandbox build` yardımcısı ve Podman desteği; belgelere paket sürümünü sabitleme tavsiyesi.
+2. Sandbox: çıkış izin listesi (14.11.2026) ve npm paketini tam sürümüyle image'a kuran `sandbox build` (16.11.2026) yapıldı. Kalanlar: Podman, PyPI (`uvx`) sunucuları için `sandbox build`; bağımlılık sürümleri derleme anında çözülüyor (image kimliği sabitlemesi sonradan değişeni yakalıyor).
 3. Güvenlik konulu zararsız metinlerde kalan yanlış alarm (ölçüm soup04-ab4 ile; mix-30'da depodaki metinlerde %6,6 → %4,7): soup04-ab4 depodaki Markdown paragraflarının %11'ini hâlâ saldırı sayıyor (çoğu saldırı örneği içeren belgeler). Sınır çiftleri setinde RAG bağlamı zehirleme isabeti %66'dan %58'e indi.
 4. Tool tanımlarında ML taraması (`ml.scan.toolDefinitions: warn`): gerçek ekosistemde yaklaşık %1 işaretleme, held-out tanım saldırılarında recall %97.6 (regex %36); başlangıç gecikmesi ölçülmeli.
 5. Held-out sette görünen boşluklar için ayrı eğitim verisi: zincirleme eylem (audit/onay kapatma), Türkçe dolaylı mail talimatı, koşullu prompt şablonu, tanımda konu kelimesine tepki. Held-out satırlarına dokunmadan, farklı ifadelerle; karar held-out + AEB/BIPIA + 107 panel olayıyla.

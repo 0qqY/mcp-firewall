@@ -1086,3 +1086,18 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     Node'da held-out: 2.032 → 1.076 MB, 333 satırda 1 karar farkı (HB-015, zararsız, Python'daki ile aynı satır). Yeni
     test: aynı modelin fp32 ve q8'i skor önbelleğinde ayrı parmak izi alıyor. 261/261. README'de "Daha az bellek" bölümü.
     Ölçülmeyenler: çalışan proxy'nin belleği, BIPIA, AEB, poligon.
+
+114. **`sandbox build` (16.11.2026):** Roadmap 8'in kalanı. `mcp-firewall sandbox build <npm paketi>@<tam sürüm>`
+    (`src/sandbox-build.ts`) paketi `node:22-alpine` üstüne `npm install -g --ignore-scripts` ile kurar; Dockerfile
+    boş bir geçici klasörden derlenir, image `mcp-<paket>:<sürüm>` adını ve paket/sürüm etiketlerini alır. Aralık, `latest`
+    ve geçersiz ad reddedilir (Dockerfile'a ya da docker argümanına doğrulanmamış değer girmez); `--tag`, `--base`
+    `isImageRef` ile denetlenir; ham docker bayrağı yok. Var olan image `--force` olmadan değiştirilmez. Bitince
+    çalıştırılabilir adlar `--network none`, salt okunur, nobody kullanıcılı bir konteynerde paketin `package.json`'ından
+    okunur ve politikaya yazılacak satırlar gösterilir; `--print` derlemeden Dockerfile'ı verir. 8 yeni test (sahte docker
+    ile build/force/hata yolları, CLI'da `--print` Docker olmadan), 269/269. Gerçek Docker Desktop: filesystem 2.2.0 11 s'de
+    derlendi (266 MB, executable `mcp-server-filesystem` doğru okundu), firewall üzerinden (izole HOME,
+    `bench/sandbox-build/drive-filesystem.mjs`) `network: none` + salt okunur mount ile 16 tool, listeleme ve okuma çalıştı,
+    salt okunur mount'a yazma EROFS, mount dışı okuma sunucu tarafından reddedildi; gerçek audit log satır almadı, konteyner
+    kalmadı; ikinci build "already exists" ile durdu. Yalnızca paketin sürümü sabit, bağımlılıklar derleme anında çözülüyor
+    (image kimliği sabitlemesi sonradan değişeni yakalıyor). Yapılmayanlar: PyPI/`uvx`, Podman, kurulum script'i gereken
+    paketler. Install yenilenmedi.
