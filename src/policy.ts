@@ -26,6 +26,7 @@ import {
 } from './sandbox.js';
 import { SYSLOG_FACILITIES, type SiemConfig } from './siem.js';
 import type { TaintConfig, TaintSink, TaintSource } from './taint.js';
+import { BlocklistError, loadBlocklist, type UrlBlocklist } from './urlblock.js';
 
 export type Mode = 'enforce' | 'monitor';
 /** ask: the call waits until the user approves it (MCP elicitation). */
@@ -96,6 +97,11 @@ export interface Policy {
     /** Offer "allow this tool for the rest of the session" in the prompt. */
     remember: boolean;
   };
+  /**
+   * Offline lists of known-bad hosts and URLs, checked against every URL in `tools/call` arguments and `resources/read`
+   * URIs. Off while `files` is empty; the lists are read once, when the firewall starts.
+   */
+  urlBlocklist: { files: string[]; action: 'block' | 'warn'; list?: UrlBlocklist };
   /** Session data-flow tracking: what source tools returned must not leave through sink tools. */
   taint: TaintConfig;
   /** Runs the server in a locked-down Docker container instead of on the host (off by default). */
@@ -484,6 +490,18 @@ function compileEgress(raw: unknown, network: string, networkGiven: boolean): Sa
   return { allow: canonical, rules, proxyImage };
 }
 
+function compileUrlBlocklist(raw: Obj, baseDir: string): Policy['urlBlocklist'] {
+  const files = (strList(raw.files, 'urlBlocklist.files') ?? []).map((f, i) => filePath(f, '', baseDir, `urlBlocklist.files[${i}]`));
+  const action = oneOf(raw.action, ['block', 'warn'] as const, 'block', 'urlBlocklist.action');
+  if (files.length === 0) return { files, action };
+  try {
+    return { files, action, list: loadBlocklist(files) };
+  } catch (err) {
+    if (err instanceof BlocklistError) throw new PolicyError(`urlBlocklist: ${err.message}`);
+    throw err;
+  }
+}
+
 /** Validates a parsed policy document; relative file paths resolve against `baseDir`. */
 export function compilePolicy(raw: unknown, baseDir: string): Policy {
   const root = obj(raw, 'policy');
@@ -501,6 +519,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
   const taint = obj(root.taint, 'taint');
   const approval = obj(root.approval, 'approval');
   const ml = obj(root.ml, 'ml');
+  const urlBlock = obj(root.urlBlocklist, 'urlBlocklist');
   const mlScan = obj(ml.scan, 'ml.scan');
   const mlReview = obj(ml.review, 'ml.review');
   if (ml.injectionLabel !== undefined && typeof ml.injectionLabel !== 'string') throw new PolicyError('ml.injectionLabel: expected a string');
@@ -596,6 +615,7 @@ export function compilePolicy(raw: unknown, baseDir: string): Policy {
       remember: bool(approval.remember, true, 'approval.remember'),
     },
     taint: compileTaint(taint, baseDir),
+    urlBlocklist: compileUrlBlocklist(urlBlock, baseDir),
     sandbox: compileSandbox(root.sandbox, baseDir, stateFiles),
     dlp: {
       enabled: bool(dlp.enabled, true, 'dlp.enabled'),

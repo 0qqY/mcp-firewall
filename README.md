@@ -131,6 +131,34 @@ Gerçek ekosistemden 179.942 tool adıyla karşılaştırıldı: `delete_*` kura
 `DELETE_TWEET` gibi), hiçbir kararın yönü izne doğru değişmedi; kurulu politikalardaki 111 sabitlenmiş tool adının
 hiçbirinde karar değişmedi.
 
+### Zararlı URL listesi (`urlBlocklist`, opt-in)
+Web'e MCP üzerinden çıkan bir model (`fetch`, `playwright`, arama sunucuları) bilinen zararlı bir adrese gitmesin diye
+çağrılardaki URL'ler **offline** listelerle karşılaştırılır. Hiçbir URL dışarıya sorulmaz; liste dosyalarını siz indirip
+güncellersiniz. `files` boşken kapalıdır.
+
+```yaml
+urlBlocklist:
+  files:
+    - ./blocklists/urlhaus.txt      # https://urlhaus.abuse.ch/downloads/text/ (tam URL listesi)
+    - ./blocklists/hosts.txt        # hosts dosyası, adblock "||alan^" listesi ya da düz alan listesi
+  action: block                     # block (varsayılan) | warn
+```
+
+- Okunan biçimler: hosts dosyası (`0.0.0.0 alan`), adblock (`||alan^`), düz alan/IP listesi, tam URL listesi (URLhaus).
+  `#` ve `!` satırları yorumdur. Okunamayan ya da hiç kayıt çıkmayan dosya firewall'u başlatmaz.
+- Bir alan kendisini ve bütün alt alanlarını engeller (`evil.example` → `a.b.evil.example`, ama `notevil.example` ya da
+  `evil.example.org` değil). Tam URL kaydı yalnızca o adresi engeller (şema ve `#` parçası sayılmaz).
+- `tools/call` argümanlarının her dizgisi (iç içe alanlar ve alan adları dahil) ve `resources/read` URI'si okunur:
+  şemalı URL'ler, metin içindeki `www.` adresleri ve değerin tamamı bir adres olan şemasız yazımlar. Arama sorgusunda
+  geçen bir ad ("evil.example güvenli mi?") URL sayılmaz. `decoding` açıksa yüzde ve base64 kodlu biçimler de okunur.
+  URL ayrıştırıcısı ondalık/onaltılık IP, IDN, `kullanıcı@host` hilesi ve IPv4-mapped IPv6 yazımlarını aynı hosta indirir.
+- `monitor` modunda ve `action: warn` ile çağrı geçer, audit log'a yazılır.
+- Bellek: liste bir kez, başlangıçta okunur. 1 milyon alanlık bir hosts dosyası yaklaşık 1,9 s ve 270 MB tutar (her proxy
+  için); URLhaus boyutunda listeler birkaç MB'tır. Büyük listeleri yalnızca web'e çıkan sunucuların politikasına koyun.
+- Sınırlar: yalnızca ilk URL görülür; sunucunun takip ettiği yönlendirmeler ve sayfanın kendi içinde yüklediği adresler
+  (`playwright`) firewall'dan geçmez. Modelin yerleşik web araması (MCP dışında) hiç görülmez. Liste ne kadar
+  günceldir, koruma o kadardır.
+
 ### Yol kısıtı (`paths`)
 Regex ile yol denetimi kolay atlatılır: `..\`, `%2e%2e/`, `file:///`, `C:\PROGRA~1`, `secret.env.` ya da izinli
 dizindeki bir junction aynı dosyaya farklı yazımlarla ulaşır. `paths` bloğu her değeri önce dosya sisteminin
@@ -414,6 +442,7 @@ Uzak sunucular (`gateway`) için geçerli değildir. Yalnızca Windows'ta Docker
 | `src/egress.ts`, `src/egress-main.ts` | Sandbox çıkış izin listesi: kural ayrıştırma, adres kontrolü, CONNECT proxy'si (proxy konteynerinde çalışır) |
 | `src/egress-throttle.ts` | Egress kararlarının audit log'a yazılma sınırı |
 | `src/sandbox.ts` | Sunucuyu kilitli Docker konteynerinde başlatma: `docker run` komutu üretimi, bağlama denetimi, image kimliği (kod pini), konteyneri durdurma |
+| `src/urlblock.ts` | `urlBlocklist`: offline zararlı host/URL listelerini okuma, çağrı argümanlarındaki URL'leri bulup karşılaştırma |
 | `src/sandbox-build.ts` | `sandbox build`: npm paketini tam sürümüyle, kurulum script'leri kapalı image'a kurma; çalıştırılabilir adları kilitli konteynerde okuma |
 | `src/decode.ts` | Metin içindeki kodlanmış parçaları çözme ve karakter düzeyinde gizlemeyi geri alma |
 | `src/audit.ts` | JSONL audit log |
@@ -1183,6 +1212,8 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
   başka alan girerse yakalanmaz, parçalar ayrı çağrılara dağılırsa `taint` gerekir.
 - `image`/`audio`/`blob` içindeki metin taraması yalnızca DLP kalıplarını okur (ML bakmaz) ve 8 MB'a kadar çözer; tanımdaki
   gömülü ikili içerik denetimi `data` ile `mimeType` ya da `encoding: base64` taşıyan nesneleri tanır.
+- `urlBlocklist` yalnızca çağrıdaki ilk URL'yi görür: yönlendirmeler ve tarayıcının sayfa içinde yüklediği adresler
+  kapsam dışıdır; koruma, listenin güncelliği kadardır.
 - JSON-RPC batch'leri tek tek mesajlar olarak iletilir.
 - Her yönün message queue'su ve pending request table'ı sınırsızdır: yoğun mesaj akıtan bir server kendi bağlantısının belleğini şişirebilir, yanıtlanmayan request'ler oturum boyunca table'da kalır. Aynı JSON-RPC ID yeniden kullanılırsa önceki request'in context'i ezilir (MCP ID'nin yeniden kullanımını yasaklar).
 - `sandbox` Docker'ın yalıtımıdır, VM sınırı değildir. Ağ açıkken (`bridge`) sunucunun kendi bağlantısı görünmez ve adres bazlı

@@ -1115,3 +1115,17 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     politikalarda 2.233 karar `allow → deny`, hiçbir karar izne doğru değişmedi; e-posta örneğinde taint kaynakları
     (`read_*`, `get_*`, `list_*`, `search_*`) 38.828, çıkışlar 596 ad daha kapsıyor. Kurulu `policy.yaml`'daki 111
     sabitlenmiş tool adında karar değişmedi (hepsi snake_case). Install yenilenmedi: kurulu kopya hâlâ eski eşleşmede.
+
+116. **Offline zararlı URL listesi (16.11.2026):** Soru: web'de arama yapan bir model için URL filtresi mimariye uyar mı?
+    Karar: yalnızca opt-in offline liste; argüman seviyesinde `urls` kısıtı, SSRF/private IP kuralı ve egress proxy'ye
+    taşıma yapılmadı. `src/urlblock.ts`: hosts dosyası, adblock `||alan^`, düz alan/IP ve tam URL (URLhaus) satırlarını
+    okur; alan kaydı alt alanlarını da kapsar, URL kaydı yalnız o adresi (şema ve parça sayılmaz, tek `/` yolu olan kayıt
+    tüm host). `tools/call` argümanlarının her dizgisi (alan adları dahil) ve `resources/read` URI'si taranır: şemalı URL,
+    metin içi `www.`, değerin tamamı olan şemasız adres; serbest metinde geçen çıplak ad URL sayılmaz (arama sorgusu yanlış
+    alarmı). `decoding` açıkken `withDecoded` biçimi de okunur (64 KB'a kadar). Host WHATWG URL ile normalleşir (ondalık/hex
+    IP, IDN → punycode, userinfo); IPv4-mapped IPv6 elle IPv4'e çevrildi (testte bulunan atlatma). Sondaki noktalama döngüyle
+    kırpılıyor (regex uzun `)))` dizisinde geri izliyordu). Politika `urlBlocklist: { files, action: block|warn }`;
+    okunamayan ya da boş liste başlatmayı durdurur. 9 yeni test, 282/282. Gerçek `mcp_server_fetch` ile (izole HOME, kurulu
+    sunucu, repo build'i): 1 milyon satırlık sentetik hosts listesi + `example.org` → `www.example.org` ve listedeki bir ad
+    sunucuya gitmeden reddedildi, `example.com` içeriği geldi; liste yükleme 1,9 s / ~270 MB; gerçek audit log satır almadı.
+    Gerçek URLhaus listesi indirilmedi. Install yenilenmedi.

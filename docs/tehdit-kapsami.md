@@ -262,6 +262,10 @@ ikili dosyalar ve `python -m` için kod yolu `--code` ile elle verilmelidir.
     calling this tool", `<important>` etiketi), varsayılan ML rastgele 3.000 gerçek tanımın %1.0'ını işaretledi. Held-out sette
     (`bench/heldout`) tanım saldırılarını regex 13/36, ML %97.6 yakalıyor. Kurulu kopya yenilenene kadar eski kodda.
 
+33. Offline zararlı URL listesi (16.11.2026, `urlBlocklist`, opt-in): `tools/call` argümanlarındaki ve `resources/read`
+    URI'sindeki URL'ler URLhaus, hosts ya da adblock biçimindeki yerel listelerle karşılaştırılıyor; dışarıya sorgu yok.
+    Yönlendirmeleri ve tarayıcının sayfa içinde yüklediklerini görmüyor; modelin yerleşik web araması kapsam dışı.
+
 **Sıradakiler:**
 
 1. "Görev talimatı" metinlerinde kalan yanlış alarm (Türkçe benchmark %33, iç testte İngilizce %53) ve dış Türkçe setlerdeki düşük isabet (%48–65).

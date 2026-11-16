@@ -32,6 +32,7 @@ import { extractKeys, extractMessageText, extractMlText, extractText, scoreTexts
 import { hashPromptTemplate, promptPinKey, type PinStatus, type PinStore } from './pinning.js';
 import type { Policy } from './policy.js';
 import { TaintTracker } from './taint.js';
+import { findBlockedUrl } from './urlblock.js';
 
 /** Response types whose payload reaches the model and is therefore scanned. */
 const SCANNED_RESULTS = new Set(['tools/call', 'resources/read', 'prompts/get']);
@@ -210,6 +211,22 @@ export class FirewallProxy {
     return this.enforcing;
   }
 
+  /**
+   * A URL on the offline blocklist in a call's arguments: logged, and the reason returned when the call must be stopped
+   * (enforce mode, action block). A warn-only hit is logged and the call goes on.
+   */
+  private blockedUrl(ctx: Context, args: unknown): string | undefined {
+    const { list, action } = this.policy.urlBlocklist;
+    if (!list) return undefined;
+    const reason = findBlockedUrl(list, args, this.policy.decoding.enabled ? withDecoded : undefined);
+    if (!reason) return undefined;
+    if (action === 'warn') {
+      this.audit.record({ ...ctx, verdict: 'warn', reason });
+      return undefined;
+    }
+    return this.violation(ctx, reason) ? reason : undefined;
+  }
+
   /** Fails closed: a message the firewall cannot parse or process is never forwarded in enforce mode. */
   private async guard(direction: Direction, line: string): Promise<void> {
     const out = direction === 'client->server' ? this.io.serverIn : this.io.clientOut;
@@ -259,6 +276,12 @@ export class FirewallProxy {
             void this.forwardIfApproved(msg, request, inspected.ask);
             return;
           }
+        } else if (msg.method === 'resources/read' && isObject(msg.params)) {
+          const badUrl = this.blockedUrl({ direction, method: msg.method }, msg.params.uri);
+          if (badUrl) {
+            send(this.io.clientOut, errorResponse(msg.id, badUrl));
+            return;
+          }
         } else if (msg.method === 'prompts/get' && isObject(msg.params) && typeof msg.params.name === 'string') {
           request.tool = msg.params.name;
           request.args = promptArguments(msg.params.arguments);
@@ -289,6 +312,11 @@ export class FirewallProxy {
     const decision = evaluateToolCall(this.policy, name, params.arguments);
     if (!decision.allowed && this.violation(ctx, decision.reason!)) {
       send(this.io.clientOut, toolErrorResponse(msg.id, decision.reason!));
+      return undefined;
+    }
+    const badUrl = this.blockedUrl(ctx, params.arguments);
+    if (badUrl) {
+      send(this.io.clientOut, toolErrorResponse(msg.id, badUrl));
       return undefined;
     }
 
