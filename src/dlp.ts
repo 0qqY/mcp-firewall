@@ -137,6 +137,14 @@ export function deepScan(value: unknown, detectors: Detector[]): { value: unknow
   const masked: Masked[] = [];
   const walk = (v: unknown, path: string): unknown => {
     if (typeof v === 'string') return scanText(v, detectors, counts, path, masked);
+    // A card or national id number sent as a JSON number (`{"card": 4111111111111111}`) is the same data; when it
+    // holds one, the redacted copy carries the placeholder string in its place. Only the shapes of those two: numbers
+    // are mostly ids and timestamps (13-digit milliseconds, 18-19-digit snowflakes), a tenth of which pass Luhn.
+    const digits = typeof v === 'number' && Number.isInteger(v) && v > 0 ? v.toLocaleString('en-US', { useGrouping: false }) : '';
+    if (digits.length === 11 || (/^[3-6]/.test(digits) && (digits.length === 15 || digits.length === 16))) {
+      const out = scanText(digits, detectors, counts, path, masked);
+      return out === digits ? v : out;
+    }
     if (Array.isArray(v)) return v.map((x, i) => walk(x, `${path}[${i}]`));
     if (isObject(v)) {
       // Base64 image/audio payloads only produce false positives; the other fields of a media block are read.

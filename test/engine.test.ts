@@ -249,3 +249,10 @@ test('taint sources and sinks match other naming styles too', () => {
   assert.equal(p.taint.sinks[0].match.test('sendEmail'), true);
   assert.equal(p.taint.sinks[0].match.test('Send-Email'), true);
 });
+
+test('DLP reads card and national id numbers sent as JSON numbers, not ids or timestamps', () => {
+  const { detectors } = policy.dlp;
+  const { value, findings } = deepScan({ card: 4111111111111111, tc: 10000000146, ms: 1731744000000, snowflake: 1234567890123456789, small: 42 }, detectors);
+  assert.deepEqual(value, { card: '[REDACTED:credit_card]', tc: '[REDACTED:tckn]', ms: 1731744000000, snowflake: 1234567890123456789, small: 42 });
+  assert.deepEqual(findings.map((f) => f.detector).sort(), ['credit_card', 'tckn']);
+});
