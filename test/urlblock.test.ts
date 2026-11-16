@@ -125,3 +125,21 @@ test('proxy: action warn and monitor mode log the hit and let the call through',
   assert.equal((await monitor.atServer.next()).id, 2);
   assert.match(monitor.audit(), /"verdict":"would_block"/);
 });
+
+test('spellings another URL parser reads differently do not step around the list', () => {
+  // WHATWG (browsers, Node fetch) reads these as https://evil.example/.
+  for (const url of ['http:evil.example/x', 'https:/evil.example/x', String.raw`https:\evil.example\x`]) assert.ok(hit({ url }), url);
+  // Python's urllib takes the host after the last @, WHATWG stops the authority at the backslash.
+  assert.ok(hit({ url: String.raw`https://good.example\@evil.example/` }));
+  // A URL nested in another one is followed by an open redirect.
+  assert.ok(hit({ url: 'https://good.example/redirect?to=https://evil.example/' }));
+  assert.equal(hit({ url: 'https://good.example/redirect?to=https://fine.example/' }), undefined);
+  assert.equal(hit({ text: 'the scheme is http: or https:, both fine' }), undefined);
+});
+
+test('a listed URL is matched whatever query, slashes or escapes are added to it', () => {
+  for (const url of ['http://198.51.100.7/bins/x.arm7?cache=1', 'http://198.51.100.7//bins//x.arm7', 'http://198.51.100.7/bins/%78.arm7']) assert.ok(hit({ url }), url);
+  // An entry with a query is matched with that query only.
+  assert.ok(hit({ url: 'https://cdn.ok.example/payload.exe?id=1' }));
+  assert.equal(hit({ url: 'https://cdn.ok.example/payload.exe?id=2' }), undefined);
+});
