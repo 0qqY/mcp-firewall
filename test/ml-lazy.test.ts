@@ -174,6 +174,11 @@ test('describeModel fingerprints the files, reads the channel tag and fails on a
   writeFileSync(join(model, 'mcp-firewall.json'), '{"channelTags": true}');
   assert.equal(describeModel(model, opts).channelTags, true);
   assert.throws(() => describeModel(model, { ...opts, dtype: 'q8' }), /model_quantized\.onnx/);
+  // ml.dtype: q8 (quant_probe.py q8) next to fp32: same folder, other weights; remembered fp32 scores must not be reused.
+  writeFileSync(join(model, 'onnx', 'model_quantized.onnx'), 'int8 embedding table');
+  const q8 = describeModel(model, { ...opts, dtype: 'q8' });
+  assert.equal(q8.name, 'model-x');
+  assert.notEqual(q8.fingerprint, describeModel(model, opts).fingerprint, 'q8 and fp32 of one model are cached apart');
   assert.throws(() => describeModel(join(dir, 'nowhere'), opts), /model file not found/);
 });
 

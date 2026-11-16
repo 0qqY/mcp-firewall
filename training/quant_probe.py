@@ -8,6 +8,11 @@ to the default model. This script looks at the parts separately, because mmBERT'
   python -I -X utf8 quant_probe.py build  --model ../models/<name> --out <work dir>
   python -I -X utf8 quant_probe.py score  --model ../models/<name> --graph <file.onnx> --texts texts.jsonl --out scores.json
   python -I -X utf8 quant_probe.py report --rows ../bench/heldout/heldout-v1.jsonl --base fp32.json <variant.json> ...
+  python -I -X utf8 quant_probe.py q8     --model ../models/<name>
+
+`q8` writes the int8-embedding variant as <model>/onnx/model_quantized.onnx, the file the firewall loads with
+`ml.dtype: q8` (opt-in; measured on the default model in bench/q8/README.md). It refuses to replace an existing file
+unless --force is given.
 
 `score` runs one graph in its own process and reports that process's peak memory (Windows: peak working set and peak
 commit), so graphs can be compared on memory as well as on scores.
@@ -90,6 +95,20 @@ def build(args) -> None:
         except Exception as e:  # a variant the installed onnxruntime cannot build is reported, not fatal
             print(f"{name}: FAILED {type(e).__name__}: {str(e)[:200]}", flush=True)
     print(f"fp32: {src.stat().st_size / 2**20:.0f} MB")
+
+
+def q8(args) -> None:
+    """The opt-in q8 file: only the embedding table (Gather) in int8, the rest of the graph stays fp32."""
+    from onnxruntime.quantization import QuantType, quantize_dynamic
+
+    src = args.model / "onnx" / "model.onnx"
+    dst = args.model / "onnx" / "model_quantized.onnx"
+    if dst.exists() and not args.force:
+        sys.exit(f"{dst} exists (export_onnx.py may have written int8-all there); pass --force to replace it")
+    tmp = dst.with_suffix(".tmp.onnx")
+    quantize_dynamic(str(src), str(tmp), weight_type=QuantType.QInt8, **VARIANTS["int8-embedding"])
+    tmp.replace(dst)
+    print(f"wrote {dst} ({dst.stat().st_size / 2**20:.0f} MB, fp32 {src.stat().st_size / 2**20:.0f} MB); use ml.dtype: q8")
 
 
 def score(args) -> None:
@@ -177,8 +196,11 @@ def main() -> None:
     r.add_argument("--base", type=Path, required=True)
     r.add_argument("--md", type=Path)
     r.add_argument("variants", type=Path, nargs="*")
+    q = sub.add_parser("q8")
+    q.add_argument("--model", type=Path, required=True)
+    q.add_argument("--force", action="store_true")
     args = ap.parse_args()
-    {"build": build, "score": score, "report": report}[args.cmd](args)
+    {"build": build, "score": score, "report": report, "q8": q8}[args.cmd](args)
 
 
 if __name__ == "__main__":

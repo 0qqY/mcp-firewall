@@ -1,6 +1,6 @@
 // Scores heldout-v1.jsonl with an ML model the way the firewall does: same text preparation per channel (hidden-character strip,
 // product text extractors, redaction-marker and image neutralising, decoding, channel tag, 1500-character windows).
-// usage: node bench/heldout/score.mjs --dist <dist/src folder> --model <model dir> --out <results.json> [--rows heldout-v1.jsonl]
+// usage: node bench/heldout/score.mjs --dist <dist/src folder> --model <model dir> --out <results.json> [--rows heldout-v1.jsonl] [--dtype fp32|q8]
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -13,6 +13,7 @@ const DIST = resolve(opt('dist', join(HERE, '..', '..', 'dist', 'src')));
 const MODEL = resolve(opt('model'));
 const OUT = opt('out') ? resolve(opt('out')) : undefined; // not needed with --dump
 const ROWS = resolve(opt('rows', join(HERE, 'heldout-v1.jsonl')));
+const DTYPE = opt('dtype', 'fp32');
 const load = (f) => import(pathToFileURL(join(DIST, f)).href);
 
 const { compilePolicy } = await load('policy.js');
@@ -22,7 +23,7 @@ const { parameterNamesText, stripHiddenChars } = await load('engine.js');
 const { stripImageData, withDecoded } = await load('decode.js');
 const { REDACTION_MARKER } = await load('dlp.js');
 
-const policy = compilePolicy({ ml: { enabled: true, model: MODEL, dtype: 'fp32', injectionLabel: 'INJECTION', threshold: 0.3, chunkChars: 1500, maxChunks: 32 }, decoding: { enabled: true } }, mkdtempSync(join(tmpdir(), 'heldout-')));
+const policy = compilePolicy({ ml: { enabled: true, model: MODEL, dtype: DTYPE, injectionLabel: 'INJECTION', threshold: 0.3, chunkChars: 1500, maxChunks: 32 }, decoding: { enabled: true } }, mkdtempSync(join(tmpdir(), 'heldout-')));
 const { ml } = policy;
 
 /** The text the classifier gets, built like proxy.ts builds it for each place a text can come from. */
@@ -66,4 +67,4 @@ for (const channel of ['definition', 'output', 'prompt']) {
   idx.forEach((i, k) => { results[i] = { id: rows[i].id, score: scores[k].score }; });
 }
 writeFileSync(OUT, JSON.stringify({ model: MODEL.split(/[\\/]/).pop(), threshold: ml.threshold, scoredAt: new Date().toISOString(), results }, null, 1));
-console.log(`wrote ${OUT}`);
+console.log(`wrote ${OUT}; peak resident memory ${Math.round(process.resourceUsage().maxRSS / 1024)} MB`);

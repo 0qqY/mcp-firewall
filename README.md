@@ -618,9 +618,24 @@ python combine.py --a runs/mcp-pi-mmbert-soup04-ab4/best --b runs/mcp-pi-mmbert-
 python export_onnx.py --model runs/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30/best --out ../models/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30
 ```
 
-Ardından politikada `ml.enabled: true` yap. Yalnızca fp32 kullanılır (`ml.dtype: fp32`). Eşik modele bağlıdır:
+Ardından politikada `ml.enabled: true` yap. Varsayılan `ml.dtype: fp32`. Eşik modele bağlıdır:
 varsayılan model için 0.3, öncekiler (mix-ab4-lab-30, soup04-ab4) ve baseline için 0.9. Kodun varsayılanı 0.9'da
 kaldı; politikada `ml.threshold` yazmayan bir kurulum yeni modelle 0.9'da çalışır.
+
+### Daha az bellek: `ml.dtype: q8` (opt-in)
+Her firewall proxy'si modeli kendisi yükler; fp32 model proxy başına ~2 GB bellek tutar. `ml.dtype: q8` yalnız
+embedding tablosu int8 olan bir dosyayı yükler (attention/MLP fp32 kalır). Önce dosyayı üret:
+
+```bash
+python -I -X utf8 training/quant_probe.py q8 --model models/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30
+```
+
+Bu, modelin `onnx/` klasörüne `model_quantized.onnx` (611 MB) yazar; `ml.model` aynı kalır, yalnız `ml.dtype: q8`
+eklenir. Ölçüm (varsayılan model, eşik 0.3): Node'da peak resident memory 2.032 → 1.076 MB, held-out'ta 333 satırda 1
+karar farkı (zararsız bir satır, 0,306 → 0,296); toplam 10.549 satırda 11 karar farkı, hepsi zararsız satır ve eşiğe
+yakın, yakalanan saldırı sayısı hiçbir sette değişmedi. Skor önbelleği fp32 ve q8 sonuçlarını ayrı tutar. Ölçülmeyenler:
+BIPIA, AEB, poligon. Ayrıntı: [bench/q8/README.md](bench/q8/README.md). `export_onnx.py`'nin eski int8 dosyası (her şey
+int8) held-out'ta 17 karar değiştirdiği için kullanılmamalı; `q8` komutu var olan dosyanın üstüne `--force` olmadan yazmaz.
 
 ### Tanımlar için ayrı model (`ml.definitionModel`)
 `ml.definitionModel` verilirse tanım kanalı (tool, prompt, resource tanımları ve sunucu `instructions`'ı) o modelle,

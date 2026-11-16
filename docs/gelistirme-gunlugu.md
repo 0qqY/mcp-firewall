@@ -1078,3 +1078,11 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     listesinde `api.github.com` varken 46 tool, `get_me` ve `search_repositories` çalıştı, tek bağlantı api.github.com:443;
     yalnız `example.com` varken iki çağrı da "Forbidden by egress allowlist" döndü, audit'e `block` yazıldı. Gerçek audit log
     bu testlerden satır almadı. README'deki "denenmedi" notu güncellendi.
+
+113. **q8 opt-in (16.11.2026):** Madde 112'deki int8-embedding graph'ı seçenek olarak eklendi; default ve install
+    değişmedi. `training/quant_probe.py q8 --model <model>` dosyayı `onnx/model_quantized.onnx` olarak yazar (var olan
+    dosyanın üstüne `--force` olmadan yazmaz, çünkü `export_onnx.py`'nin her şeyi int8 yapan eski dosyası aynı adı
+    kullanır); politikada `ml.dtype: q8`. `bench/heldout/score.mjs` `--dtype` aldı ve peak resident memory yazıyor.
+    Node'da held-out: 2.032 → 1.076 MB, 333 satırda 1 karar farkı (HB-015, zararsız, Python'daki ile aynı satır). Yeni
+    test: aynı modelin fp32 ve q8'i skor önbelleğinde ayrı parmak izi alıyor. 261/261. README'de "Daha az bellek" bölümü.
+    Ölçülmeyenler: çalışan proxy'nin belleği, BIPIA, AEB, poligon.

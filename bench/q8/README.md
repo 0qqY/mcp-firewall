@@ -36,6 +36,15 @@ default ve install **değiştirilmedi**. Fark küçük ve yönsüz (zararsız sa
 kazancı büyük (peak working set 2,7 → 1,6 GB, dosya 1,17 → 0,61 GB). Opt-in bir seçenek olarak sunulabilir; ölçülmeyenler:
 BIPIA, AEB, poligon, Node'da proxy başına gerçek bellek.
 
+## Opt-in olarak eklendi (16.11.2026)
+
+`python -I -X utf8 training/quant_probe.py q8 --model <model>` int8-embedding graph'ını modelin kendi klasörüne
+`onnx/model_quantized.onnx` olarak yazar; politikada `ml.dtype: q8` ile yüklenir. Default değişmedi.
+Node'da ölçüm (`bench/heldout/score.mjs --dtype fp32|q8`, held-out 333 satır, aynı makine, sırayla): peak resident
+memory **2.032 → 1.076 MB**, süre 21 → 20 s, 1 karar farkı (HB-015, zararsız, 0,306 → 0,296), en büyük skor farkı 0,068.
+Python'daki ölçümle aynı satır. Bu, tek bir Node sürecinin belleği; çalışan bir proxy'de ölçülmedi. BIPIA, AEB ve
+poligon hâlâ ölçülmedi.
+
 Yeniden üretmek: `python -X utf8 quant_probe.py build --model ../models/<B30> --out <dizin>`, sonra
 [score_variants.sh](score_variants.sh) ve `node bench/heldout/score.mjs --model <int8-embedding klasörü> --rows <satırlar>`.
 Satır dosyaları git-ignored veriden üretildi (`night/q8/rows`, depoda değil).
