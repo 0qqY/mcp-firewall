@@ -105,7 +105,7 @@ export const qualifyDefaultImage = (image: string, runtime: ContainerRuntime): s
   runtime === 'podman' && !image.includes('/') ? `docker.io/library/${image}` : image;
 
 /** Podman documents the bare form; Docker takes both. Docker's command line is left as it was. */
-const noNewPrivileges = (runtime: string): string => (runtime === 'podman' ? 'no-new-privileges' : 'no-new-privileges:true');
+export const noNewPrivileges = (runtime: string): string => (runtime === 'podman' ? 'no-new-privileges' : 'no-new-privileges:true');
 
 const runtimeName = (executable: string): string => (/podman/i.test(executable) ? 'Podman' : 'Docker');
 
@@ -370,7 +370,9 @@ export function inspectImage(image: string, run: Runner = defaultRunner, executa
     }
     return { kind: 'error', problem: err.split('\n')[0] || `docker exited with status ${r.status}` };
   }
-  const id = r.stdout.trim();
+  // Podman prints the id without its algorithm prefix; both runtimes mean the same sha256 digest.
+  const raw = r.stdout.trim();
+  const id = /^[0-9a-f]{64}$/.test(raw) ? `sha256:${raw}` : raw;
   if (!/^sha256:[0-9a-f]{64}$/.test(id)) return { kind: 'error', problem: `unexpected image id: ${id.slice(0, 80)}` };
   return { kind: 'ok', id };
 }

@@ -181,3 +181,9 @@ test('CLI: sandbox build --runtime podman writes the base image out in full; oth
   const lxc = spawnSync(process.execPath, [CLI, 'sandbox', 'build', 'pkg@1.0.0', '--runtime', 'lxc'], { encoding: 'utf8', env });
   assert.equal(lxc.status, 2);
 });
+
+test('podman: the executables are read with podman\'s form of no-new-privileges', () => {
+  const args = binArgs({ ecosystem: 'pypi', name: 'p', version: '1.0' }, 'x:1', 'podman');
+  assert.equal(args[args.indexOf('--security-opt') + 1], 'no-new-privileges');
+  assert.ok(binArgs({ name: 'p', version: '1.0.0' }, 'x:1').includes('no-new-privileges:true'));
+});

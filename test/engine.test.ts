@@ -273,7 +273,7 @@ test('DLP sees a key written in full-width letters or with %XX escapes, and leav
   const key = `ghp_${'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'}`;
   const wide = [...key].map((c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0)).join('');
   const all = [...key].map((c) => `%${c.charCodeAt(0).toString(16)}`).join('');
-  const { value, findings } = deepScan({ wide, all, url: `https://x.test/?t=ghp%5F${key.slice(4)}`, cjk: '価格は１００円です', pct: 'a%20b%2Fc 100% %E0%A4' }, detectors);
-  assert.deepEqual(value, { wide: '[REDACTED:github_token]', all: '[REDACTED:github_token]', url: 'https://x.test/?t=[REDACTED:github_token]', cjk: '価格は１００円です', pct: 'a%20b%2Fc 100% %E0%A4' });
-  assert.deepEqual(findings.map((f) => [f.detector, f.count]), [['github_token', 3]]);
+  const { value, findings } = deepScan({ wide, all, url: `https://x.test/?t=ghp%5F${key.slice(4)}`, cjk: '価格は１００円です', pct: 'a%20b%2Fc 100% %E0%A4', decoy: `AKIAIOSFODNN7EXAMPLE then ghp%5F${key.slice(4)}` }, detectors);
+  assert.deepEqual(value, { wide: '[REDACTED:github_token]', all: '[REDACTED:github_token]', url: 'https://x.test/?t=[REDACTED:github_token]', cjk: '価格は１００円です', pct: 'a%20b%2Fc 100% %E0%A4', decoy: '[REDACTED:aws_access_key] then [REDACTED:github_token]' });
+  assert.deepEqual(findings.map((f) => [f.detector, f.count]), [['github_token', 4], ['aws_access_key', 1]]);
 });

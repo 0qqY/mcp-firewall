@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import spawn from 'cross-spawn';
-import { DEFAULT_PROXY_IMAGE, inspectImage, isImageRef, missingHint, SandboxError, unreachableHint, type Runner } from './sandbox.js';
+import { DEFAULT_PROXY_IMAGE, inspectImage, isImageRef, missingHint, noNewPrivileges, SandboxError, unreachableHint, type Runner } from './sandbox.js';
 
 /**
  * `mcp-firewall sandbox build`: makes the image a sandboxed npm MCP server runs in, so nobody has to write a
@@ -146,8 +146,8 @@ export const PYPI_BIN_SCRIPT =
   "import importlib.metadata as m,json,sys;d=m.distribution(sys.argv[1]);" +
   "sys.stdout.write(json.dumps(sorted(e.name for e in d.entry_points if e.group=='console_scripts')))";
 
-export function binArgs(pkg: BuildPackage, tag: string): string[] {
-  const lock = ['run', '--rm', '--pull', 'never', '--network', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--read-only', '--user', '65534:65534'];
+export function binArgs(pkg: BuildPackage, tag: string, executable = 'docker'): string[] {
+  const lock = ['run', '--rm', '--pull', 'never', '--network', 'none', '--cap-drop', 'ALL', '--security-opt', noNewPrivileges(executable), '--read-only', '--user', '65534:65534'];
   if (isPypi(pkg)) return [...lock, '--entrypoint', 'python', tag, '-B', '-I', '-c', PYPI_BIN_SCRIPT, pkg.name];
   return [...lock, '--entrypoint', 'node', tag, '-e', BIN_SCRIPT, pkg.name];
 }
@@ -208,7 +208,7 @@ export async function buildImage(o: BuildOptions, run: Runner = syncRunner, stre
   const built = inspectImage(o.tag, run, executable);
   if (built.kind !== 'ok') throw new SandboxError(`sandbox build: the image was built but cannot be inspected: ${built.problem}`);
   let bins: string[] = [];
-  const r = run(executable, binArgs(o.pkg, o.tag), 60_000);
+  const r = run(executable, binArgs(o.pkg, o.tag, executable), 60_000);
   if (!r.error && r.status === 0) {
     try {
       const parsed: unknown = JSON.parse(r.stdout.trim());

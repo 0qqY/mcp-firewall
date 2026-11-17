@@ -330,3 +330,12 @@ test('podman: missing image, a stopped Podman machine and a missing podman comma
   const enoent: Runner = () => ({ status: null, stdout: '', stderr: '', error: Object.assign(new Error('spawn podman ENOENT'), { code: 'ENOENT' }) });
   assert.throws(() => preflight(cfg, enoent), /the podman command was not found; install Podman/);
 });
+
+test('podman: an image id printed without its sha256: prefix is read as the same id', () => {
+  const hex = 'd'.repeat(64);
+  const bare: Runner = () => ({ status: 0, stdout: `${hex}\n`, stderr: '' });
+  assert.deepEqual(inspectImage('x', bare, 'podman'), { kind: 'ok', id: `sha256:${hex}` });
+  assert.equal(preflight(sandbox({ runtime: 'podman' }), bare), `sha256:${hex}`);
+  const odd: Runner = () => ({ status: 0, stdout: 'abc\n', stderr: '' });
+  assert.equal(inspectImage('x', odd, 'podman').kind, 'error');
+});

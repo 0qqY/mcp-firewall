@@ -115,13 +115,17 @@ const percentDecode = (text: string): string =>
 
 function scanText(text: string, detectors: Detector[], counts: Map<string, number>, where: string, masked: Masked[]): string {
   // Zero-width characters dropped into a key hide it from the reader and from a pattern alike, so look through
-  // them, and through full-width letters. A copy with the %XX escapes decoded is tried when the text itself holds
-  // nothing. The cleaned copy is handed back only when a secret turned up in it; ordinary text goes on unchanged.
+  // them, and through full-width letters. Then the %XX escapes left after that pass are decoded and scanned too, so a
+  // plain secret next to an escaped one cannot shield it. The cleaned copy is handed back only when a secret turned up
+  // in it; ordinary text goes on unchanged.
   const cleaned = foldFullWidth(stripInvisible(text));
   const first = scanOnce(cleaned, text, detectors, counts, where, masked);
-  if (first !== text || !/%[0-9A-Fa-f]{2}/.test(cleaned)) return first;
-  const decoded = percentDecode(cleaned);
-  return decoded === cleaned ? text : scanOnce(decoded, text, detectors, counts, where, masked);
+  const base = first === text ? cleaned : first;
+  if (!/%[0-9A-Fa-f]{2}/.test(base)) return first;
+  const decoded = percentDecode(base);
+  if (decoded === base) return first;
+  const second = scanOnce(decoded, base, detectors, counts, where, masked);
+  return second === base ? first : second;
 }
 
 function scanOnce(prepared: string, text: string, detectors: Detector[], counts: Map<string, number>, where: string, masked: Masked[]): string {

@@ -1160,6 +1160,9 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     tam adla (`docker.io/library/...`, short-name-mode), Podman hata metinleri tanınır. **Gerçek Podman'da denenmedi**
     (kurulu değil); yalnız birim testi. (3) Dünkü turun açık maddeleri: Kiril/Yunan benzer harf, tam genişlikli harf ya
     da görünmez karakterle yazılan tool adı deny/ask/taint kuralını atlatıyordu (ec9368e); tam genişlikli ya da `%XX`
-    kaçışlı secret DLP'den geçiyordu (8af9535); `completion/complete` cevapları taranmıyordu (bcfafb0). 11 yeni test,
-    298/298; yeni regex'ler ReDoS denetiminde temiz. Kalan: Podman'ın gerçek kurulumda denenmesi, sunucu bildirimlerinin
+    kaçışlı secret DLP'den geçiyordu (8af9535; aynı metinde düz bir secret varken kodlu olanın geçmesi de sonradan
+    kapatıldı); `completion/complete` cevapları taranmıyordu (bcfafb0): artık DLP, gizli karakter ve ML taraması
+    uygulanıyor; gerçek B30 modeliyle 7 zararsız öneri listesi 0.000-0.001, saldırı içeren liste 1.000 aldı. Podman'ın
+    öneksiz image kimliği (`sha256:` olmadan) de kabul ediliyor. 13 yeni test, 300/300; PyPI ve DLP için eklenen 6
+    regex ReDoS denetiminde temiz. Kalan: Podman'ın gerçek kurulumda denenmesi, sunucu bildirimlerinin
     (`notifications/message`) taranması, roadmap 1 ve 7. Install yenilenmedi, push yok.
