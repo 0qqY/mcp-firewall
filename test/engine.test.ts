@@ -256,3 +256,14 @@ test('DLP reads card and national id numbers sent as JSON numbers, not ids or ti
   assert.deepEqual(value, { card: '[REDACTED:credit_card]', tc: '[REDACTED:tckn]', ms: 1731744000000, snowflake: 1234567890123456789, small: 42 });
   assert.deepEqual(findings.map((f) => f.detector).sort(), ['credit_card', 'tckn']);
 });
+
+test('deny, ask and taint rules see through look-alike letters, full-width forms and invisible characters in tool names', () => {
+  const p = compilePolicy({ tools: { default: 'allow', rules: [{ match: 'delete_*', action: 'deny' }, { match: 'read_*', action: 'allow' }] } }, '.');
+  const names = ['d\u0435lete_file', '\uff44\uff45\uff4c\uff45\uff54\uff45_file', 'delete\u200b_file', 'D\u0435leteFile', 'del\u00adete_file', '\u0501elete_file'];
+  for (const n of names) assert.equal(findToolRule(p, n)?.action, 'deny', JSON.stringify(n));
+  assert.equal(findToolRule(p, '\u043f\u043e\u0438\u0441\u043a_files'), undefined, 'a Russian name is not a Latin one');
+  assert.equal(findToolRule(p, 'r\u0435ad_file'), undefined, 'an allow rule is not widened: the look-alike falls to the default');
+  const t = Date.now();
+  restrictiveToolMatcher('delete_*').test('\u0435'.repeat(200_000));
+  assert.ok(Date.now() - t < 500);
+});

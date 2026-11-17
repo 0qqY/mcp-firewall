@@ -1,3 +1,5 @@
+import { toolNameSkeleton } from './decode.js';
+
 /** Converts a `*` / `?` wildcard pattern into an anchored regular expression. */
 export function globToRegExp(glob: string): RegExp {
   const source = glob
@@ -34,5 +36,12 @@ export function foldToolName(name: string): string {
 export function restrictiveToolMatcher(glob: string): NameMatcher {
   const exact = globToRegExp(glob);
   const folded = globToRegExp(foldToolName(glob));
-  return { test: (name: string) => exact.test(name) || folded.test(foldToolName(name)) };
+  // A server picks its tool names, so a deny rule also looks through look-alike letters and invisible characters.
+  return {
+    test: (name: string) => {
+      if (exact.test(name) || folded.test(foldToolName(name))) return true;
+      const skeleton = toolNameSkeleton(name);
+      return skeleton !== name && (exact.test(skeleton) || folded.test(foldToolName(skeleton)));
+    },
+  };
 }

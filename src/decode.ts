@@ -394,6 +394,15 @@ export function mixesLookAlikes(name: string): boolean {
   return (name.match(/[\p{L}\p{M}]+/gu) ?? []).some((word) => /[A-Za-z]/.test(word) && [...word].some((c) => c in HOMOGLYPHS));
 }
 
+/**
+ * The plain Latin spelling a tool name imitates, for deny-type rules only: full-width and other compatibility forms
+ * folded (NFKC), invisible characters dropped, every Cyrillic or Greek look-alike mapped to its Latin letter. So
+ * "dеlete_file" (Cyrillic е), "ｄｅｌｅｔｅ_file" and "delete" + U+200B + "_file" are all "delete_file". Each step is one pass.
+ */
+export function toolNameSkeleton(name: string): string {
+  return [...stripInvisible(name.normalize('NFKC'))].map((c) => HOMOGLYPHS[c] ?? c).join('');
+}
+
 const IMAGE_DATA_URI = /data:image\/(?:png|jpe?g|gif|webp|x-icon|vnd\.microsoft\.icon);base64,([A-Za-z0-9+/]+={0,2})/gi;
 /** File signatures; a data URI only counts as an image when its bytes start with one. */
 const IMAGE_MAGIC = ['89504e470d0a1a0a', 'ffd8ff', '47494638', '52494646', '00000100'];
