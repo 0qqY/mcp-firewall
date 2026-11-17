@@ -38,7 +38,8 @@ import { findBlockedUrl } from './urlblock.js';
  * Response types whose payload reaches the model and is therefore scanned. A task-augmented `tools/call` answers with
  * a task handle only; the tool's real result comes later from `tasks/result` (or inline in `tasks/get`).
  */
-const SCANNED_RESULTS = new Set(['tools/call', 'resources/read', 'prompts/get', 'tasks/result', 'tasks/get']);
+// completion/complete: the values the server suggests for a prompt or resource argument go into that argument.
+const SCANNED_RESULTS = new Set(['tools/call', 'resources/read', 'prompts/get', 'tasks/result', 'tasks/get', 'completion/complete']);
 /** Methods that read a task's outcome: they carry the result of the tool call that started the task. */
 const TASK_READS = new Set(['tasks/result', 'tasks/get']);
 /** Task handles remembered per session (taskId -> tool), oldest dropped first. */

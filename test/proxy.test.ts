@@ -328,3 +328,13 @@ test('the result of a task-augmented tools/call is scanned when the client reads
     assert.doesNotMatch(JSON.stringify(reply), new RegExp(GH_TOKEN), method);
   }
 });
+
+test('completion/complete suggestions are scanned: a secret in a suggested value is masked', async () => {
+  const h = harness({ ...BASE, dlp: { enabled: true, action: 'redact' } });
+  h.toServer({ jsonrpc: '2.0', id: 5, method: 'completion/complete', params: { ref: { type: 'ref/prompt', name: 'p' }, argument: { name: 'a', value: 'x' } } });
+  await h.atServer.next();
+  h.toClient({ jsonrpc: '2.0', id: 5, result: { completion: { values: ['xyz', `token ${GH_TOKEN}`], total: 2, hasMore: false } } });
+  const reply = await h.atClient.next();
+  assert.doesNotMatch(JSON.stringify(reply), new RegExp(GH_TOKEN));
+  assert.equal((reply.result as { completion: { values: string[] } }).completion.values[0], 'xyz');
+});
