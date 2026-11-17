@@ -33,7 +33,7 @@ Host ──HTTP───► mcp-firewall gateway ──HTTPS──► Uzak MCP s
 | Sunucular arası tool gölgeleme | `pinning.onNameCollision`: başka sunucunun da sunduğu tool adı uyarılır veya gizlenir |
 | Hata mesajıyla zehirleme (ATPA) | JSON-RPC `error` yanıtları da DLP, gizli karakter ve ML taramasından geçer |
 | Görünmez talimatlar, ANSI ile gizleme | `hiddenText`: sonuç, hata ve sampling içeriğindeki görünmez karakterler ve terminal kaçış kodları temizlenir |
-| Veri sızdırma | `dlp.scanRequests`: argümanlardaki secret/PII maskeleme veya engelleme; görünmez karakterlerle (sıfır genişlikli vb.) bölünmüş anahtarlar da bulunur, JSON property name (key) olarak taşınanlar da bulunur ve key maskelenir, komşu alanlara bölünmüş anahtarlar (`access_key` + `key_suffix`) yerinde maskelenemeyeceği için `warn` dışında engellenir |
+| Veri sızdırma | `dlp.scanRequests`: argümanlardaki secret/PII maskeleme veya engelleme; görünmez karakterlerle (sıfır genişlikli vb.) bölünmüş, tam genişlikli harfle (`ｇｈｐ＿...`) ya da `%XX` kaçışıyla (`ghp%5F...`) yazılmış anahtarlar da bulunur, JSON property name (key) olarak taşınanlar da bulunur ve key maskelenir, komşu alanlara bölünmüş anahtarlar (`access_key` + `key_suffix`) yerinde maskelenemeyeceği için `warn` dışında engellenir |
 | Formatsız veri sızdırma (toxic flow) | `taint`: kaynak tool'ların döndürdüğü metnin özetleri oturum boyunca tutulur; bu metni (düz, büyük-küçük harf değişmiş ya da base64'lenmiş) argümanında taşıyan çıkış tool'u engellenir. Aynı istemcinin sunucuları etiketleri paylaşır |
 | Secret/PII'nin modele sızması | `dlp.scanResponses`: tool/resource/prompt sonuçlarında maskeleme; sahte görsel başlığının arkasına konmuş metin sırları (`image`/`audio`/`blob` içinde) engellenir |
 | Server'ın LLM'ini kötüye kullanması | `methods.deny: [sampling/createMessage]`, ya da izin verilirse içerik taraması (`ml.scan.serverRequests`) ve `sampling` sınırları: dakika/oturum başına istek, istek başına `maxTokens` tavanı, oturum token bütçesi |
@@ -124,6 +124,9 @@ işlemi `delete_file`, `deleteFile`, `DeleteFile`, `delete-file` ya da `DELETE_F
 kısıtlayan desenler (`deny` ve `ask` kuralları, `taint` kaynakları ve çıkışları) adı yazıldığı gibi **ya da** adlandırma
 biçiminden arındırılmış hâliyle (camelCase ve `-`, `.`, `:`, `/`, boşluk sınırları `_` olur, harfler küçülür) eşler:
 `delete_*` yukarıdakilerin hepsini yakalar (16.11.2026; önceki sürümlerde yalnızca `delete_file` yakalanıyordu).
+Aynı desenler adı Latin harflere benzeyen Kiril ve Yunan harfleri Latin karşılıklarına çevrilmiş, tam genişlikli harfleri
+(`ｄｅｌｅｔｅ`) düz harfe indirilmiş, görünmez karakterleri (sıfır genişlikli boşluk, yumuşak tire) silinmiş hâliyle de
+dener: `dеlete_file` (Kiril `е`) de `delete_*`'a takılır (17.11.2026). Rusça bir ad (`поиск_files`) Latin bir ada dönmez.
 `allow` kuralları tam yazımla eşler: bir izin listesini sessizce genişletmemek için `read_*` izni `readFile`'ı kapsamaz,
 `default: deny` ise ona ayrı kural yazın. Sınırı olmayan adlar (`DELETEFILE`, `deletefile`) bölünemez; onlar için
 `delete*` yazın. Yöntem adları (`methods.deny`) ve yollar (`paths`) bundan etkilenmez.

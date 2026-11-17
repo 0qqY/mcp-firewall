@@ -1147,3 +1147,19 @@ kapsamı için [tehdit-kapsami.md](tehdit-kapsami.md).
     tam genişlikli (ｇｈｐ＿) ya da yüzde kodlu secret DLP'den geçiyor (model seçimli kodlama, sınırsız); tool adında
     Kiril harf deny kuralını atlatır (yalnız `hiddenUnicode` uyarısı); `completion/complete` ve bildirimler taranmıyor;
     sandbox/egress denenmedi (Docker Desktop kapalıydı). Install yenilenmedi, push yok.
+
+118. **Roadmap kalanları (17.11.2026, ~2 saat):** Roadmap'te açık olan 1 (etiketli audit verisiyle eğitim), 7 (görev
+    talimatı / Türkçe yanlış alarmları) ve 8'in kalanı (Podman, PyPI `sandbox build`) vardı. 1 ve 7 saatler süren eğitim
+    zinciri istiyor ve B30'dan sonraki her tur onu geçemedi; bu turda başlatılmadı. Yapılanlar: (1) **PyPI `sandbox
+    build`** (045d89a): `sandbox build pypi:<paket>==<tam sürüm>`, `python:3.12-slim` üstüne `pip --only-binary=:all:`
+    (sdist derleme kodu çalışmaz; Alpine yerine Debian çünkü wheel'ler glibc için), image `mcp-pypi-<paket>:<sürüm>`
+    (npm'le çakışmaz), çalıştırılabilir adlar `console_scripts`'ten kilitli konteynerde. Gerçek mcp-server-fetch
+    2026.8.18: 29 sn derleme; firewall arkasında `network: none` ile çağrı bağlanamadı, `egress: [example.com]` ile
+    example.com geldi, www.iana.org proxy'de reddedildi. (2) **`sandbox.runtime: podman`** ve `sandbox build --runtime`
+    (aynı commit): bütün komutlar seçilen araca gider, Podman'da `no-new-privileges` yalın, firewall'un seçtiği image'lar
+    tam adla (`docker.io/library/...`, short-name-mode), Podman hata metinleri tanınır. **Gerçek Podman'da denenmedi**
+    (kurulu değil); yalnız birim testi. (3) Dünkü turun açık maddeleri: Kiril/Yunan benzer harf, tam genişlikli harf ya
+    da görünmez karakterle yazılan tool adı deny/ask/taint kuralını atlatıyordu (ec9368e); tam genişlikli ya da `%XX`
+    kaçışlı secret DLP'den geçiyordu (8af9535); `completion/complete` cevapları taranmıyordu (bcfafb0). 11 yeni test,
+    298/298; yeni regex'ler ReDoS denetiminde temiz. Kalan: Podman'ın gerçek kurulumda denenmesi, sunucu bildirimlerinin
+    (`notifications/message`) taranması, roadmap 1 ve 7. Install yenilenmedi, push yok.
