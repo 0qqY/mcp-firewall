@@ -100,10 +100,32 @@ const redactionPlaceholder = (name: string): string => `[REDACTED:${name}]`;
  */
 export const REDACTION_MARKER = /\[REDACTED:[^\]]+\]/g;
 
+/** Full-width ASCII (U+FF01-FF5E, "ｇｈｐ＿") to plain ASCII: the same key to a reader, a different one to a pattern. */
+const foldFullWidth = (text: string): string => text.replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+
+/** Each run of %XX escapes decoded where it is valid UTF-8 ("ghp%5F..." in a URL); invalid runs stay as written. */
+const percentDecode = (text: string): string =>
+  text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run;
+    }
+  });
+
 function scanText(text: string, detectors: Detector[], counts: Map<string, number>, where: string, masked: Masked[]): string {
   // Zero-width characters dropped into a key hide it from the reader and from a pattern alike, so look through
-  // them. The cleaned copy is handed back only when a secret turned up in it; ordinary text goes on unchanged.
-  let out = stripInvisible(text);
+  // them, and through full-width letters. A copy with the %XX escapes decoded is tried when the text itself holds
+  // nothing. The cleaned copy is handed back only when a secret turned up in it; ordinary text goes on unchanged.
+  const cleaned = foldFullWidth(stripInvisible(text));
+  const first = scanOnce(cleaned, text, detectors, counts, where, masked);
+  if (first !== text || !/%[0-9A-Fa-f]{2}/.test(cleaned)) return first;
+  const decoded = percentDecode(cleaned);
+  return decoded === cleaned ? text : scanOnce(decoded, text, detectors, counts, where, masked);
+}
+
+function scanOnce(prepared: string, text: string, detectors: Detector[], counts: Map<string, number>, where: string, masked: Masked[]): string {
+  let out = prepared;
   let found = false;
   const hints = new Map<string, (string | undefined)[]>();
   for (const d of detectors) {
