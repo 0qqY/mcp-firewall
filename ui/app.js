@@ -913,6 +913,139 @@ function kpis({ detections, ml, pending, labels }) {
       h('button', { class: 'btn-dark', style: { marginTop: '8px' }, onclick: () => setView('ml', { mlFilter: 'pending', selectedId: null }) }, 'Etiketle', icon('arrowRight', 12, 2.2))));
 }
 
+// ---------- why this decision ----------
+
+/** Which part of the firewall decided: the reader judges a rule, a model score and a pin change differently. */
+function decisionKind(e) {
+  // The original English reason: `reason` is the Turkish rendering shown on screen.
+  const r = (e.reasonRaw ?? e.reason ?? '').toLowerCase();
+  if (e.ruleInfo) return 'rule';
+  if (typeof e.score === 'number') return 'ml';
+  if (e.category === 'dlp' || MASKS.has(e.verdict)) return 'dlp';
+  if (e.category === 'rugpull' || r.includes('pins approve') || r.includes('pinned')) return 'pin';
+  if (e.category === 'method') return 'method';
+  if (r.includes('hidden from the tool list')) return 'hidden';
+  if (r.includes('blocklist')) return 'url';
+  if (r.includes('data flow')) return 'taint';
+  if (e.category === 'poisoning') return 'pattern';
+  return 'other';
+}
+
+const KIND_LABEL = {
+  rule: 'Senin kuralın', ml: 'ML modeli', dlp: 'DLP', pin: 'Sabitleme', method: 'Yöntem yasağı',
+  hidden: 'Gizli araç', url: 'URL kara listesi', taint: 'Veri akışı', pattern: 'Tanım deseni', other: '—',
+};
+
+const code = (t) => h('code', { class: 'd-code' }, t);
+const fileName = (f) => (f ? f.split(/[\\/]/).pop() : null);
+
+/** One plain sentence: what reached whom, and what the firewall did with it. */
+function whatHappened(e) {
+  const srv = e.server ?? 'sunucu';
+  const tool = e.tool ? code(e.tool) : null;
+  const watching = e.verdict === 'would_block' || e.verdict === 'would_redact';
+  const tail = watching ? ' İzleme modunda olduğu için yalnızca kaydedildi; hiçbir şey durdurulmadı.' : '';
+  if (e.method === 'tools/list' && BLOCKS.has(e.verdict)) {
+    return [h('b', {}, srv), ' sunucusu ', tool, ' aracını sundu. Firewall bu aracı yapay zekânın araç listesinden çıkardı: yapay zekâ onu görmedi ve çağıramaz.', tail];
+  }
+  if (e.method === 'tools/call' && e.direction === 'client->server' && BLOCKS.has(e.verdict)) {
+    return ['Yapay zekâ ', h('b', {}, srv), ' sunucusunda ', tool, ' aracını çağırmak istedi. Firewall çağrıyı sunucuya iletmedi.', tail];
+  }
+  if (e.direction === 'server->client' && BLOCKS.has(e.verdict) && e.tool) {
+    return [h('b', {}, srv), ' sunucusundan gelen ', tool, ' sonucu yapay zekâya iletilmedi; yerine bir hata mesajı gitti.', tail];
+  }
+  if (MASKS.has(e.verdict)) {
+    return [h('b', {}, srv), e.direction === 'client->server' ? ' sunucusuna giden istekte' : ' sunucusundan gelen cevapta', ' hassas veri bulundu ve yerine ', code('[REDACTED:…]'), ' yazıldı; mesajın geri kalanı iletildi.', tail];
+  }
+  if (e.verdict === 'warn') return ['Firewall bunu şüpheli buldu ama ayarı yalnızca uyarmak olduğu için mesajı iletti.'];
+  if (BLOCKS.has(e.verdict)) return [h('b', {}, srv), ' ile yapay zekâ arasındaki bu mesaj durduruldu.', tail];
+  return null;
+}
+
+/** Why the firewall decided so, in terms the reader can check. */
+function whyText(e, kind, config) {
+  const ri = e.ruleInfo;
+  if (kind === 'rule') {
+    const where = fileName(ri.policyFile);
+    if (ri.pattern === 'default') {
+      return ['Bu bir tahmin değil. Politikanın varsayılan kararı ', code(`tools.default: ${ri.action}`), '; bu araç için ayrı bir kural yok.', where ? [' Dosya: ', code(where), '.'] : null];
+    }
+    return [
+      'Bu bir tahmin değil, politikandaki bir kural. ', code(ri.pattern), ' deseni bu araç adıyla eşleşti, kuralın eylemi ', code(ri.action), '.',
+      ri.reason ? [' Kurala yazılmış açıklama: “', ri.reason, '”.'] : null,
+      where ? [' Dosya: ', code(where), ', ', code('tools.rules'), ' listesi.'] : null,
+      ri.fromRecord ? null : h('span', { class: 'd-soft' }, ' Bu eski kayıt kuralın adını taşımıyor; kural sunucunun şu anki politikasından bulundu.'),
+      (e.reasonRaw ?? e.reason ?? '').includes('; ') ? h('span', { class: 'd-soft' }, ' Aynı karara başka gerekçeler de katıldı; hepsi yukarıdaki kayıt gerekçesinde.') : null,
+    ];
+  }
+  if (kind === 'ml') {
+    const t = config.ml?.threshold;
+    return ['Firewall\'un ML modeli metni okudu ve ', h('b', {}, e.score.toFixed(3)), ' puan verdi (0 = zararsız, 1 = saldırı).',
+      typeof t === 'number' ? [' Eşik ', h('b', {}, String(t)), '; üstündeki metin gizli talimat sayılır.'] : null,
+      ' Bu bir tahmindir: model yanılabilir, bu yüzden aşağıdaki metne bakarak karar verebilirsin.'];
+  }
+  if (kind === 'dlp') return ['DLP, bilinen bir biçime uyan veri buldu: API anahtarı, özel anahtar, kart numarası, IBAN ya da TC kimlik no gibi. Kart ve TC kimlik no için sağlama hanesi de kontrol edildi.'];
+  if (kind === 'pin') return ['Firewall bu aracın, prompt\'un ya da sunucu kodunun parmak izini (SHA-256) ilk görüşte sakladı. Şimdi gelen sürüm o izden farklı: sunucu onaydan sonra bir şeyi değiştirmiş.'];
+  if (kind === 'method') return ['Politikadaki ', code('methods.deny'), ' listesi bu yöntemi tamamen kapatıyor.'];
+  if (kind === 'hidden') return ['Bu araç daha önce araç listesinden gizlenmişti. Yapay zekâ adını önceden bildiği için yine de çağırmaya çalıştı; gizli araç çağrılamaz.'];
+  if (kind === 'url') return ['Argümandaki bir adres, politikada verilen çevrimdışı zararlı URL listesinde var.'];
+  if (kind === 'taint') return ['Bu oturumda daha önce kaynak olarak işaretli bir araçtan veri okundu; bu çağrı o veriyi dışarı taşıyabilecek bir araca gidiyor.'];
+  if (kind === 'pattern') return ['Araç tanımında bilinen bir zehirleme ifadesi bulundu (ör. ', code('<IMPORTANT>'), ', ', code('~/.ssh'), ', "kullanıcıya söyleme").'];
+  return null;
+}
+
+/** What to look at to decide whether the decision was right. */
+function judgeList(e, kind) {
+  const ri = e.ruleInfo;
+  if (kind === 'rule') {
+    return [
+      'Bu aracın bu sunucuda kapalı olmasını istiyor musun? İstiyorsan karar doğru, yapılacak bir şey yok.',
+      ['İstemiyorsan politika dosyasındaki ', code(ri.pattern), ' kuralını daralt ya da kaldır; firewall\'u yeniden başlattığında araç görünür.'],
+      'Kurallar etiketlenmez: bu kayıtlar modeli eğitmek için kullanılmaz.',
+    ];
+  }
+  if (kind === 'ml') {
+    return [
+      'Tetikleyen metni oku. Kullanıcıya değil yapay zekâya emir veriyor mu? “Önceki talimatları unut”, “şu dosyayı gönder”, “kullanıcıya söyleme” gibi.',
+      'Sıradan bir belge, README ya da kullanıcının kendi talimatıysa büyük olasılıkla yanlış pozitif.',
+      'Kaynağı düşün: bu sunucu bu metni neden döndürsün? Bir e-posta, issue ya da web sayfası dışarıdan herkesin yazabildiği bir yerdir.',
+      'Kararını aşağıdaki düğmelerle etiketle; etiketler modeli yeniden eğitmekte kullanılır.',
+    ];
+  }
+  if (kind === 'dlp') return ['Maskelenen değer gerçek bir anahtar ya da kişisel veri mi, yoksa örnek ya da test değeri mi?', 'Gerçekse, bu aracın o veriyi görmesi ya da göndermesi gerekiyor muydu?'];
+  if (kind === 'pin') {
+    return ['Sunucuyu ya da paketini yakın zamanda güncelledin mi? Güncellediysen değişiklik beklenen olabilir.',
+      'Yeni tanımda gizli bir talimat, yeni bir parametre ya da kimlik bilgisi isteyen bir alan var mı?',
+      ['Değişiklik güvenliyse onayla: ', code(`mcp-firewall pins approve --name ${e.server ?? '<sunucu>'}`)]];
+  }
+  if (kind === 'hidden') return ['Aracın neden gizlendiği gerekçede yazıyor; o gizleme doğruysa bu engel de doğru.'];
+  return null;
+}
+
+/** Same server, tool and reason: a rule fires on every tool list, so the count says more than one row. */
+function repeats(e, events) {
+  // Each model detection is a different text; only a rule or a fixed check repeats the same decision.
+  if (e.excerpt) return null;
+  const same = events.filter((x) => x.server === e.server && x.tool === e.tool && x.reason === e.reason && x.verdict === e.verdict);
+  if (same.length < 2) return null;
+  return h('div', { class: 'd-repeat' },
+    h('b', {}, `${same.length} kez`), ' kaydedildi · ilk ', fmtTime(same[0].ts), ' · son ', fmtTime(same[same.length - 1].ts),
+    e.method === 'tools/list' ? h('span', { class: 'd-soft' }, ' (yapay zekâ araç listesini her istediğinde aynı karar yeniden yazılır)') : null);
+}
+
+function explainBlock(e, d) {
+  const kind = decisionKind(e);
+  const what = whatHappened(e);
+  const why = whyText(e, kind, d.config);
+  const judge = judgeList(e, kind);
+  return h('div', { class: 'd-explain' },
+    what ? h('section', {}, h('h4', {}, 'Ne oldu?'), h('p', {}, what)) : null,
+    why ? h('section', {}, h('h4', {}, 'Kararı ne verdi?'), h('p', {}, why)) : null,
+    e.description ? h('section', {}, h('h4', {}, 'Aracın kendi açıklaması'), h('pre', {}, e.description)) : null,
+    judge ? h('section', {}, h('h4', {}, 'Doğru mu, nasıl anlarım?'), h('ul', {}, judge.map((j) => h('li', {}, j)))) : null,
+    repeats(e, d.events));
+}
+
 function detailPane(e, labels) {
   if (!e) {
     return h('div', { class: 'detail' }, h('div', { class: 'empty' }, h('b', {}, 'Olay seçilmedi'), 'Soldaki listeden bir olay seç.'));
@@ -920,7 +1053,9 @@ function detailPane(e, labels) {
   const review = labels[e.id];
   const detection = DETECTIONS.has(e.verdict);
   const below = isReview(e);
-  const ruleYaml = e.tool ? `tools:\n  rules:\n    - match: "${e.tool.replace(/"/g, '\\"')}"\n      action: deny\n      reason: "${evId(e)} incelemesi"\n` : null;
+  const d = derive();
+  const kind = decisionKind(e);
+  const ruleYaml = e.tool && !e.ruleInfo ? `tools:\n  rules:\n    - match: "${e.tool.replace(/"/g, '\\"')}"\n      action: deny\n      reason: "${evId(e)} incelemesi"\n` : null;
   return h('div', { class: 'detail' },
     h('div', { class: 'd-top' },
       h('div', {},
@@ -931,14 +1066,19 @@ function detailPane(e, labels) {
     h('div', { class: 'd-cards' },
       h('div', { class: 'd-card' }, h('b', {}, cat(e).label), h('span', {}, 'Kategori')),
       h('div', { class: 'd-card' }, h('b', {}, e.direction === 'client->server' ? 'İstemci → Sunucu' : e.direction ? 'Sunucu → İstemci' : '—'), h('span', {}, 'Yön')),
-      h('div', { class: 'd-card' }, h('b', {}, typeof e.score === 'number' ? e.score.toFixed(3) : '—'), h('span', {}, 'ML skoru')),
-      ruleYaml
+      typeof e.score === 'number'
+        ? h('div', { class: 'd-card' }, h('b', {}, e.score.toFixed(3)), h('span', {}, 'ML skoru'))
+        : h('div', { class: 'd-card' }, h('b', {}, KIND_LABEL[kind]), h('span', {}, 'Kararı veren')),
+      e.ruleInfo
+        ? h('div', { class: 'd-card' }, h('b', { title: e.ruleInfo.pattern }, e.ruleInfo.pattern), h('span', {}, 'Eşleşen kural'))
+        : ruleYaml
         ? h('button', { class: 'd-card dashed', onclick: () => textDialog('Kural önerisi', `${e.tool} aracını engelleyen kural. Politika dosyandaki tools.rules listesine ekle.`, ruleYaml, 'Kural YAML olarak kopyalandı') }, h('span', { style: { color: '#fff' } }, icon('plus', 18)), h('span', {}, 'Kural öner'))
         : h('div', { class: 'd-card dashed' }, h('span', {}, 'Kural önerisi yok'))),
     h('div', { class: 'd-reason' },
-      h('b', {}, 'Gerekçe'), h('div', {}, e.reason ?? '—'),
+      h('b', {}, 'Kayıttaki gerekçe'), h('div', {}, e.reason ?? '—'),
       e.excerpt ? [h('div', { class: 'd-label', style: { marginTop: '10px' } }, 'Tetikleyen metin (yalnızca olay kaydında, modele gönderilmez)'), h('pre', {}, e.excerpt)] : null),
     maskedBlock(e),
+    explainBlock(e, d),
     h('div', { class: 'd-foot' },
       h('div', {}, h('span', { class: 'd-label' }, 'Zaman'), h('b', {}, fmtTime(e.ts))),
       h('div', {}, h('span', { class: 'd-label' }, 'Doğrulama'), h('b', {}, detection || below ? reviewText(e, review, 'Doğru tespit', 'Yanlış pozitif', 'Bekliyor') : '—')),

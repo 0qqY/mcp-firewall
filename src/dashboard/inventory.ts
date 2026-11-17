@@ -340,6 +340,26 @@ mcp-firewall pins approve --name ${input.name}` });
   };
 }
 
+/** The policy each configured server runs under, keyed by its audit id, with the file it came from. */
+export function serverPolicies(configFiles: [string, string][]): Map<string, { policy?: Policy; file?: string }> {
+  const loaded = new Map<string, Policy | undefined>();
+  const out = new Map<string, { policy?: Policy; file?: string }>();
+  for (const entry of readClientEntries(configFiles)) {
+    const parsed = parseEntry(entry);
+    if (!parsed.firewalled || out.has(parsed.id)) continue;
+    const key = parsed.policyFile ?? '';
+    if (!loaded.has(key)) {
+      try {
+        loaded.set(key, loadPolicy(parsed.policyFile));
+      } catch {
+        loaded.set(key, undefined);
+      }
+    }
+    out.set(parsed.id, { policy: loaded.get(key), file: parsed.policyFile });
+  }
+  return out;
+}
+
 /** Every MCP server the clients on this machine know, plus servers seen only in the audit log, riskiest first. */
 export function inventory(opts: { configFiles: [string, string][]; events: StoredEvent[]; fallbackPolicy: Policy; now?: number }): ServerRisk[] {
   const byId = new Map<string, { entry: ClientEntry; parsed: Parsed; clients: string[] }>();

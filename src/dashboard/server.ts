@@ -3,8 +3,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AuditEvent } from '../audit.js';
+import { findToolRule } from '../engine.js';
 import type { Policy } from '../policy.js';
-import { defaultClientConfigs, inventory } from './inventory.js';
+import { defaultClientConfigs, inventory, serverPolicies } from './inventory.js';
 
 const UI_DIR = fileURLToPath(new URL('../../../ui/', import.meta.url));
 const STATIC: Record<string, [file: string, type: string]> = {
@@ -25,6 +26,25 @@ export interface StoredEvent extends AuditEvent {
   ts: string;
   server: string;
   category: Category;
+  /** The rule behind a tool decision, as the policy states it now (`fromRecord`: the record itself named it). */
+  ruleInfo?: { pattern: string; action: string; reason?: string; policyFile?: string; fromRecord: boolean };
+}
+
+const BLOCKING = new Set(['block', 'would_block']);
+
+/**
+ * Which `tools.rules` entry decided a tool event. Newer records name the rule; for older ones the server's current
+ * policy is asked, and only a rule whose own reason (or default wording) matches the record's reason is taken.
+ */
+export function ruleInfoFor(e: AuditEvent, policy: Policy | undefined, policyFile?: string): StoredEvent['ruleInfo'] {
+  if (!e.tool || (e.method !== 'tools/list' && e.method !== 'tools/call')) return undefined;
+  if (e.rule === 'default') return { pattern: 'default', action: policy?.tools.default ?? 'deny', policyFile, fromRecord: true };
+  const rule = policy ? (e.rule ? policy.tools.rules.find((r) => r.pattern === e.rule) : findToolRule(policy, e.tool)) : undefined;
+  if (e.rule) return { pattern: e.rule, action: rule?.action ?? 'deny', reason: rule?.reason, policyFile, fromRecord: true };
+  if (!rule || rule.action === 'allow' || !BLOCKING.has(e.verdict)) return undefined;
+  const reason = e.reason ?? '';
+  const matches = (rule.reason !== undefined && reason.startsWith(rule.reason)) || reason.includes(`rule '${rule.pattern}'`);
+  return matches ? { pattern: rule.pattern, action: rule.action, reason: rule.reason, policyFile, fromRecord: false } : undefined;
 }
 
 interface LabelRecord {
@@ -58,7 +78,7 @@ export function categorize(e: AuditEvent): Category {
   if (r.includes('rug pull')) return 'rugpull';
   if (r.includes("method '")) return 'method';
   if (r.includes('malformed') || r.includes('oversized') || r.includes('internal error')) return 'protocol';
-  if (r.includes('denied') || r.includes('argument')) return 'policy';
+  if (e.rule || r.includes('denied') || r.includes('argument')) return 'policy';
   return 'other';
 }
 
@@ -146,6 +166,16 @@ export function startDashboard(opts: DashboardOptions): Server {
         const server = url.searchParams.get('server');
         const all = readAudit(auditFile);
         const events = server ? all.filter((e) => e.server === server) : all;
+        const policies = serverPolicies(clientConfigs);
+        for (const e of events) {
+          const own = policies.get(e.server);
+          const info = ruleInfoFor(e, own ? own.policy : policy, own?.file);
+          if (info) {
+            e.ruleInfo = info;
+            // An older record whose rule had its own reason was filed under "other".
+            if (e.category === 'other') e.category = 'policy';
+          }
+        }
         const labels = Object.fromEntries([...readLabels(labelsFile)].map(([id, l]) => [id, l.review]));
         return json(res, 200, { config, servers: [...new Set(all.map((e) => e.server).filter(Boolean))].sort(), events, labels });
       }

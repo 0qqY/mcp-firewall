@@ -54,8 +54,8 @@ test('policy: ask is a rule and default action; approval defaults', () => {
 
 test('engine: ask tools stay listed; argument checks refuse before anyone is asked', () => {
   const p = compilePolicy(RULES, dir);
-  assert.deepEqual(evaluateToolName(p, 'send_email'), { allowed: true, ask: 'outgoing email' });
-  assert.deepEqual(evaluateToolCall(p, 'send_email', { to: 'bob@corp.example' }), { allowed: true, ask: 'outgoing email' });
+  assert.deepEqual(evaluateToolName(p, 'send_email'), { allowed: true, ask: 'outgoing email', rule: 'send_email' });
+  assert.deepEqual(evaluateToolCall(p, 'send_email', { to: 'bob@corp.example' }), { allowed: true, ask: 'outgoing email', rule: 'send_email' });
   assert.equal(evaluateToolCall(p, 'send_email', { to: 'eve@evil.example' }).allowed, false);
   assert.equal(evaluateToolCall(p, 'read_file', {}).ask, undefined);
   const byDefault = compilePolicy({ tools: { default: 'ask' } }, dir);

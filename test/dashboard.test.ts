@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { categorize, readAudit, startDashboard } from '../src/dashboard/server.js';
+import { categorize, readAudit, ruleInfoFor, startDashboard } from '../src/dashboard/server.js';
 import { compilePolicy } from '../src/policy.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'mcpfw-dash-'));
@@ -40,6 +40,23 @@ test('categorize maps audit reasons to threat categories', () => {
   assert.equal(categorize({ verdict: 'block', reason: 'tool definition changed since it was pinned (possible rug pull)' }), 'rugpull');
   assert.equal(categorize({ verdict: 'block', reason: "method 'sampling/createMessage' denied by policy" }), 'method');
   assert.equal(categorize({ verdict: 'block', reason: "argument 'path' matches deny pattern /x/" }), 'policy');
+  // a rule with its own wording is still a policy decision when the record names the rule
+  assert.equal(categorize({ verdict: 'block', method: 'tools/list', reason: 'Deletes are off here', rule: 'delete_*' }), 'policy');
+});
+
+test('ruleInfoFor names the rule behind a tool decision, and only a matching one for old records', () => {
+  const policy = compilePolicy({ tools: { rules: [{ match: 'delete_*', action: 'deny', reason: 'Deletes are off here' }] } }, dir);
+  const base = { verdict: 'block', method: 'tools/list', tool: 'delete_file' } as const;
+  // newer record: names the rule itself
+  assert.deepEqual(ruleInfoFor({ ...base, reason: 'Deletes are off here', rule: 'delete_*' }, policy, 'p.yaml'), {
+    pattern: 'delete_*', action: 'deny', reason: 'Deletes are off here', policyFile: 'p.yaml', fromRecord: true,
+  });
+  assert.equal(ruleInfoFor({ ...base, rule: 'default' }, policy)?.pattern, 'default');
+  // older record: the current rule is taken only when its reason matches the recorded one
+  assert.equal(ruleInfoFor({ ...base, reason: 'Deletes are off here' }, policy)?.fromRecord, false);
+  assert.equal(ruleInfoFor({ ...base, reason: 'tool definition changed since it was pinned (possible rug pull)' }, policy), undefined);
+  assert.equal(ruleInfoFor({ ...base, verdict: 'allow' }, policy), undefined);
+  assert.equal(ruleInfoFor({ verdict: 'redact', method: 'tools/call', reason: 'sensitive data' }, policy), undefined);
 });
 
 test('readAudit skips torn lines and keeps line ids', () => {

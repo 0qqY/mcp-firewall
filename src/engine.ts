@@ -6,6 +6,8 @@ import type { Policy, ToolRule } from './policy.js';
 export interface Decision {
   allowed: boolean;
   reason?: string;
+  /** The `tools.rules` pattern behind the decision, or `default` for the policy's default action. */
+  rule?: string;
   /** Set when the call may proceed only once the user approves it; says why. */
   ask?: string;
 }
@@ -122,11 +124,11 @@ export function evaluateToolName(policy: Policy, name: string): Decision {
   const rule = findToolRule(policy, name);
   if (rule) {
     if (rule.action === 'allow') return ALLOW;
-    if (rule.action === 'ask') return { allowed: true, ask: rule.reason ?? `tool '${name}' needs approval (rule '${rule.pattern}')` };
-    return { allowed: false, reason: rule.reason ?? `tool '${name}' denied by rule '${rule.pattern}'` };
+    if (rule.action === 'ask') return { allowed: true, ask: rule.reason ?? `tool '${name}' needs approval (rule '${rule.pattern}')`, rule: rule.pattern };
+    return { allowed: false, reason: rule.reason ?? `tool '${name}' denied by rule '${rule.pattern}'`, rule: rule.pattern };
   }
-  if (policy.tools.default === 'ask') return { allowed: true, ask: `tool '${name}' needs approval (default policy)` };
-  return policy.tools.default === 'allow' ? ALLOW : { allowed: false, reason: `tool '${name}' denied by default policy` };
+  if (policy.tools.default === 'ask') return { allowed: true, ask: `tool '${name}' needs approval (default policy)`, rule: 'default' };
+  return policy.tools.default === 'allow' ? ALLOW : { allowed: false, reason: `tool '${name}' denied by default policy`, rule: 'default' };
 }
 
 export function evaluateToolCall(policy: Policy, name: string, args: unknown): Decision {
@@ -138,15 +140,15 @@ export function evaluateToolCall(policy: Policy, name: string, args: unknown): D
     const target = key === '*' ? args : isObject(args) ? args[key] : undefined;
     for (const value of collectStrings(target)) {
       const denied = constraint.deny.find((r) => r.test(value));
-      if (denied) return { allowed: false, reason: `argument '${key}' matches deny pattern /${denied.source}/` };
+      if (denied) return { allowed: false, reason: `argument '${key}' matches deny pattern /${denied.source}/`, rule: rule.pattern };
       if (constraint.allow.length > 0 && !constraint.allow.some((r) => r.test(value))) {
-        return { allowed: false, reason: `argument '${key}' is not in the allow list` };
+        return { allowed: false, reason: `argument '${key}' is not in the allow list`, rule: rule.pattern };
       }
     }
   }
   if (rule.paths) {
     const reason = checkPaths(rule.paths, isObject(args) ? args : {});
-    if (reason) return { allowed: false, reason };
+    if (reason) return { allowed: false, reason, rule: rule.pattern };
   }
   // Argument checks come first: a call they refuse is never put to the user.
   return byName;

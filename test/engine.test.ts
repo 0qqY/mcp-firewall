@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { deepScan } from '../src/dlp.js';
 import { foldToolName, restrictiveToolMatcher } from '../src/glob.js';
-import { evaluateMethod, evaluateToolCall, findToolRule, hasHiddenChars, parameterNamesText, scanToolDefinition, stripHiddenChars } from '../src/engine.js';
+import { evaluateMethod, evaluateToolCall, evaluateToolName, findToolRule, hasHiddenChars, parameterNamesText, scanToolDefinition, stripHiddenChars } from '../src/engine.js';
 import { approvePending, PinStore, toolPin } from '../src/pinning.js';
 import { compilePolicy, PolicyError } from '../src/policy.js';
 
@@ -28,7 +28,7 @@ const policy = compilePolicy(
 );
 
 test('deny rule blocks matching tools with its reason', () => {
-  assert.deepEqual(evaluateToolCall(policy, 'delete_file', {}), { allowed: false, reason: 'no deletes' });
+  assert.deepEqual(evaluateToolCall(policy, 'delete_file', {}), { allowed: false, reason: 'no deletes', rule: 'delete_*' });
 });
 
 test('argument constraints enforce deny and allow lists', () => {
@@ -276,4 +276,11 @@ test('DLP sees a key written in full-width letters or with %XX escapes, and leav
   const { value, findings } = deepScan({ wide, all, url: `https://x.test/?t=ghp%5F${key.slice(4)}`, cjk: '価格は１００円です', pct: 'a%20b%2Fc 100% %E0%A4', decoy: `AKIAIOSFODNN7EXAMPLE then ghp%5F${key.slice(4)}` }, detectors);
   assert.deepEqual(value, { wide: '[REDACTED:github_token]', all: '[REDACTED:github_token]', url: 'https://x.test/?t=[REDACTED:github_token]', cjk: '価格は１００円です', pct: 'a%20b%2Fc 100% %E0%A4', decoy: '[REDACTED:aws_access_key] then [REDACTED:github_token]' });
   assert.deepEqual(findings.map((f) => [f.detector, f.count]), [['github_token', 4], ['aws_access_key', 1]]);
+});
+
+test('a tool decision names the rule that made it', () => {
+  const policy = compilePolicy({ tools: { default: 'deny', rules: [{ match: 'read_*', action: 'allow', arguments: { path: { deny: ['secret'] } } }, { match: 'delete_*', action: 'deny' }] } }, tmpdir());
+  assert.equal(evaluateToolName(policy, 'delete_file').rule, 'delete_*');
+  assert.equal(evaluateToolName(policy, 'write_file').rule, 'default');
+  assert.equal(evaluateToolCall(policy, 'read_file', { path: '/secret' }).rule, 'read_*');
 });

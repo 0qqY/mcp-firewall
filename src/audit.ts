@@ -17,6 +17,10 @@ export interface AuditEvent {
   excerpt?: string;
   /** What DLP masked and where; holds no secret, see `Masked`. */
   masked?: Masked[];
+  /** The `tools.rules` pattern that decided (`default`: the policy's default action), so a reader can find the rule. */
+  rule?: string;
+  /** The start of a hidden tool's own description: what the tool does, for whoever reviews the decision. */
+  description?: string;
 }
 
 /** What goes to the SIEM sinks besides the JSONL file. */
@@ -51,10 +55,10 @@ export class AuditLog {
     if (!toFile && !toSinks) return;
     const record: SiemRecord = { ts: new Date().toISOString(), server: this.server, ...event };
     if (toSinks) {
-      // `context` is tool text like `excerpt`, so it follows the same switch; detector, path and hint always go.
+      // `context` and `description` are tool text like `excerpt`, so they follow the same switch; detector, path and hint always go.
       const out = this.forward.excerpt
         ? record
-        : { ...record, excerpt: undefined, masked: record.masked?.map(({ context: _, ...m }) => m) };
+        : { ...record, excerpt: undefined, description: undefined, masked: record.masked?.map(({ context: _, ...m }) => m) };
       for (const sink of this.forward.sinks) sink.send(out);
     }
     if (!toFile) return;

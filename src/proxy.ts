@@ -322,7 +322,7 @@ export class FirewallProxy {
     const ctx: Context = { direction: 'client->server', method: 'tools/call', tool: name };
 
     const decision = evaluateToolCall(this.policy, name, params.arguments);
-    if (!decision.allowed && this.violation(ctx, decision.reason!)) {
+    if (!decision.allowed && this.violation({ ...ctx, rule: decision.rule }, decision.reason!)) {
       send(this.io.clientOut, toolErrorResponse(msg.id, decision.reason!));
       return undefined;
     }
@@ -971,6 +971,11 @@ export class FirewallProxy {
         else this.audit.record({ ...ctx, verdict: 'warn', reason });
       }
 
+      // What the hidden tool says it does, so whoever reviews the record can judge the decision.
+      if (hideReasons.length > 0) {
+        if (!byName.allowed) ctx.rule = byName.rule;
+        if (typeof tool.description === 'string' && tool.description.trim()) ctx.description = tool.description.trim().slice(0, 400);
+      }
       if (hideReasons.length > 0 && this.violation(ctx, hideReasons.join('; '))) {
         this.hiddenTools.set(name, hideReasons.join('; '));
         return;

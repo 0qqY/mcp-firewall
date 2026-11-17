@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -64,6 +64,29 @@ test('tools/list hides denied and poisoned tools', async () => {
   const reply = await h.atClient.next();
   assert.deepEqual(reply.result.tools.map((t: { name: string }) => t.name), ['read_file']);
   assert.equal(reply.result.nextCursor, 'c2');
+});
+
+test('the audit record of a hidden tool names the rule and keeps the start of its description', async () => {
+  const auditFile = join(dir, 'rule-audit.jsonl');
+  const policy = compilePolicy({ ...BASE, tools: { rules: [{ match: 'delete_*', action: 'deny', reason: 'Deletes are off here' }] } }, dir);
+  const clientIn = new PassThrough();
+  const clientOut = new PassThrough();
+  const serverIn = new PassThrough();
+  const serverOut = new PassThrough();
+  new FirewallProxy(policy, new AuditLog(auditFile, false, 'test', null), undefined, { clientIn, clientOut, serverIn, serverOut }).start();
+  const atClient = messageReader(clientOut);
+  const atServer = messageReader(serverIn);
+  send(clientIn, { jsonrpc: '2.0', id: 'L', method: 'tools/list' });
+  await atServer.next();
+  send(serverOut, { jsonrpc: '2.0', id: 'L', result: { tools: [{ name: 'delete_repo', description: 'Delete a repository for good' }] } });
+  await atClient.next();
+  send(clientIn, call(9, 'delete_repo', { name: 'x' }));
+  await atClient.next();
+  const events = readFileSync(auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const hidden = events.find((e) => e.method === 'tools/list');
+  assert.equal(hidden.rule, 'delete_*');
+  assert.equal(hidden.description, 'Delete a repository for good');
+  assert.equal(events.find((e) => e.method === 'tools/call').rule, 'delete_*');
 });
 
 test('secrets in tool results are redacted', async () => {
