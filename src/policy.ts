@@ -18,8 +18,10 @@ import {
   isSize,
   isUser,
   mountProblem,
+  qualifyDefaultImage,
   RESERVED_ENV,
   SANDBOX_DEFAULTS,
+  type ContainerRuntime,
   type SandboxConfig,
   type SandboxEgress,
   type SandboxMount,
@@ -375,7 +377,7 @@ function compileTaint(raw: Obj, baseDir: string): TaintConfig {
   };
 }
 
-const SANDBOX_KEYS = ['enabled', 'image', 'pull', 'network', 'readOnly', 'tmpfsSize', 'user', 'memory', 'cpus', 'pidsLimit', 'mounts', 'env', 'workdir', 'egress'];
+const SANDBOX_KEYS = ['enabled', 'runtime', 'image', 'pull', 'network', 'readOnly', 'tmpfsSize', 'user', 'memory', 'cpus', 'pidsLimit', 'mounts', 'env', 'workdir', 'egress'];
 
 /**
  * `stateFiles` are the firewall's own files (audit log, pins, taint data, model): a mount that reaches them
@@ -443,11 +445,13 @@ function compileSandbox(raw: unknown, baseDir: string, stateFiles: string[]): Sa
     return { source, target: o.target, readOnly: oneOf(o.mode, ['ro', 'rw'] as const, 'ro', `${path}.mode`) === 'ro' };
   });
 
-  const egress = compileEgress(s.egress, network, s.network !== undefined);
+  const runtime = oneOf(s.runtime, ['docker', 'podman'] as const, SANDBOX_DEFAULTS.runtime, 'sandbox.runtime');
+  const egress = compileEgress(s.egress, network, s.network !== undefined, runtime);
   for (const name of env) if (egress && EGRESS_RESERVED_ENV.has(name)) throw new PolicyError(`sandbox.env: ${name} is set by the sandbox when egress is on`);
 
   return {
     enabled,
+    runtime,
     image,
     pull: oneOf(s.pull, ['never', 'missing', 'always'] as const, SANDBOX_DEFAULTS.pull, 'sandbox.pull'),
     network,
@@ -466,7 +470,7 @@ function compileSandbox(raw: unknown, baseDir: string, stateFiles: string[]): Sa
 }
 
 /** `sandbox.egress`: an allowlist of destinations; the network setting must be left at `none`. */
-function compileEgress(raw: unknown, network: string, networkGiven: boolean): SandboxEgress | undefined {
+function compileEgress(raw: unknown, network: string, networkGiven: boolean, runtime: ContainerRuntime): SandboxEgress | undefined {
   if (raw === undefined) return undefined;
   const e = obj(raw, 'sandbox.egress');
   for (const key of Object.keys(e)) if (!['allow', 'proxyImage'].includes(key)) throw new PolicyError(`sandbox.egress.${key}: unknown option`);
@@ -483,7 +487,7 @@ function compileEgress(raw: unknown, network: string, networkGiven: boolean): Sa
       throw err;
     }
   });
-  const proxyImage = e.proxyImage === undefined ? DEFAULT_PROXY_IMAGE : e.proxyImage;
+  const proxyImage = e.proxyImage === undefined ? qualifyDefaultImage(DEFAULT_PROXY_IMAGE, runtime) : e.proxyImage;
   if (typeof proxyImage !== 'string' || !isImageRef(proxyImage)) throw new PolicyError(`sandbox.egress.proxyImage: not a valid image reference: ${String(proxyImage)}`);
   // Normalised form, so the proxy container and the audit log see the same thing the checks used.
   const canonical = rules.map((r) => `${r.wildcard ? '*.' : ''}${r.host.includes(':') ? `[${r.host}]` : r.host}:${r.port}`);

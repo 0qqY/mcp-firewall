@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { RunResult } from '../src/sandbox.js';
-import { binArgs, buildNpmImage, buildSummary, defaultTag, npmDockerfile, parseNpmSpec } from '../src/sandbox-build.js';
+import { binArgs, buildImage, buildNpmImage, buildSummary, defaultBase, defaultTag, npmDockerfile, parseBuildSpec, parseNpmSpec, PYPI_BIN_SCRIPT, pypiDockerfile } from '../src/sandbox-build.js';
 
 const CLI = fileURLToPath(new URL('../src/cli.js', import.meta.url));
 const ID_OLD = `sha256:${'a'.repeat(64)}`;
@@ -123,4 +123,61 @@ test('CLI: sandbox build --print shows the Dockerfile without Docker; bad input 
   assert.equal(base.status, 2);
   const none = spawnSync(process.execPath, [CLI, 'sandbox', 'build'], { encoding: 'utf8', env });
   assert.equal(none.status, 2);
+});
+
+test('PyPI: only pypi:name==exact is taken, and the ecosystem is never guessed', () => {
+  assert.deepEqual(parseBuildSpec('pypi:mcp-server-fetch==2025.4.7'), { ecosystem: 'pypi', name: 'mcp-server-fetch', version: '2025.4.7' });
+  assert.deepEqual(parseBuildSpec('pypi:Mcp_Thing==1.0rc1.post2'), { ecosystem: 'pypi', name: 'Mcp_Thing', version: '1.0rc1.post2' });
+  assert.deepEqual(parseBuildSpec('npm:pkg@1.0.0'), { name: 'pkg', version: '1.0.0' });
+  for (const bad of ['pypi:x==1.*', 'pypi:x>=1.0', 'pypi:x==1.0+local', 'pypi:x==1!2.0', 'pypi:x', 'pypi:==1.0', 'pypi:x y==1.0', 'pypi:x;id==1.0', 'pypi:x==1.0 --index-url=http://e', 'pypi:-x==1.0']) {
+    assert.throws(() => parseBuildSpec(bad), /exact|valid PyPI/, bad);
+  }
+  assert.throws(() => parseBuildSpec('mcp-server-fetch==2025.4.7'), /exact version/); // a PyPI spec without the prefix is not read as one
+});
+
+test('PyPI: wheels only on a glibc base, an image name apart from npm, labels and executables per ecosystem', () => {
+  const py = { ecosystem: 'pypi' as const, name: 'mcp.server_fetch', version: '2025.4.7' };
+  assert.equal(defaultBase(py), 'python:3.12-slim');
+  assert.equal(defaultBase({ name: 'p', version: '1.0.0' }), 'node:22-alpine');
+  assert.equal(defaultTag(py), 'mcp-pypi-mcp-server-fetch:2025.4.7');
+  assert.notEqual(defaultTag({ ecosystem: 'pypi', name: 'foo', version: '1.0.0' }), defaultTag({ name: 'foo', version: '1.0.0' }));
+  const file = pypiDockerfile(py, 'python:3.12-slim');
+  assert.match(file, /^RUN pip install --no-cache-dir --only-binary=:all: .* mcp\.server_fetch==2025\.4\.7$/m);
+  const args = binArgs(py, 'mcp-pypi-x:1');
+  assert.equal(args[args.indexOf('--entrypoint') + 1], 'python');
+  assert.equal(args[args.indexOf('--network') + 1], 'none');
+  assert.ok(args.includes('--read-only') && args.includes(PYPI_BIN_SCRIPT) && args[args.length - 1] === 'mcp.server_fetch');
+});
+
+test('PyPI: buildImage writes the pip Dockerfile and labels the image as PyPI', async () => {
+  const d = fakeDocker(new Map(), '["mcp-server-fetch"]');
+  const py = { pkg: { ecosystem: 'pypi' as const, name: 'mcp-server-fetch', version: '2025.4.7' }, tag: 'mcp-pypi-fetch:1', base: 'python:3.12-slim', force: false };
+  const result = await buildImage(py, d.run, d.stream);
+  assert.deepEqual(result.bins, ['mcp-server-fetch']);
+  assert.match(d.dockerfile(), /only-binary=:all:/);
+  const build = d.calls.find((c) => c[0] === 'build')!;
+  assert.ok(build.includes('org.mcp-firewall.pypi-package=mcp-server-fetch') && !build.some((a) => a.includes('npm-')));
+  assert.match(buildSummary(py, result), /pypi:mcp-server-fetch==2025\.4\.7, base python:3\.12-slim, wheels only/);
+});
+
+test('CLI: sandbox build --print for a PyPI package', () => {
+  const env = { ...process.env, PATH: '', Path: '' };
+  const r = spawnSync(process.execPath, [CLI, 'sandbox', 'build', 'pypi:mcp-server-fetch==2025.4.7', '--print'], { encoding: 'utf8', env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^FROM python:3\.12-slim$/m);
+  assert.match(r.stdout, /--tag mcp-pypi-mcp-server-fetch:2025\.4\.7/);
+  const bad = spawnSync(process.execPath, [CLI, 'sandbox', 'build', 'pypi:mcp-server-fetch==2025.*', '--print'], { encoding: 'utf8', env });
+  assert.equal(bad.status, 1);
+});
+
+test('CLI: sandbox build --runtime podman writes the base image out in full; other runtimes are refused', () => {
+  const env = { ...process.env, PATH: '', Path: '' };
+  const r = spawnSync(process.execPath, [CLI, 'sandbox', 'build', 'pypi:mcp-server-fetch==2025.4.7', '--runtime', 'podman', '--print'], { encoding: 'utf8', env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^FROM docker\.io\/library\/python:3\.12-slim$/m);
+  assert.match(r.stdout, /^# podman build --tag/m);
+  const own = spawnSync(process.execPath, [CLI, 'sandbox', 'build', 'pkg@1.0.0', '--runtime', 'podman', '--base', 'node:20', '--print'], { encoding: 'utf8', env });
+  assert.match(own.stdout, /^FROM node:20$/m, 'a base the user gave is left as given');
+  const lxc = spawnSync(process.execPath, [CLI, 'sandbox', 'build', 'pkg@1.0.0', '--runtime', 'lxc'], { encoding: 'utf8', env });
+  assert.equal(lxc.status, 2);
 });

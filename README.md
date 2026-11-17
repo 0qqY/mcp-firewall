@@ -318,6 +318,7 @@ yakalayamazsınız. `sandbox` açıkken sunucu makinede değil, kilitli bir Dock
 | `env` | boş | Makinenizden konteynere geçen değişken **adları**; değer komut satırına yazılmaz (`-e ADI`) |
 | `mounts` | boş | Bağlanan klasörler, varsayılan salt okunur (`mode: rw` ile yazılabilir). Ev dizini, `~/.ssh`, `~/.aws` gibi kimlik bilgisi klasörleri, politikanın kendi klasörü, denetim/pin/taint dosyaları, ML modeli ve Docker soketi bağlanamaz; sembolik bağlar çözüldükten sonra yeniden denetlenir |
 | `pull` | `never` | Yalnızca yerel image kullanılır, firewall kendiliğinden indirme yapmaz; `missing` veya `always` ile değişir |
+| `runtime` | `docker` | Konteyner aracı: `docker` ya da `podman` (17.11.2026); aşağıda "Podman" |
 | `egress` | yok | Çıkış izin listesi (14.11.2026): sunucu yalnızca listedeki `host[:port]` hedeflerine bağlanabilir; aşağıda "Çıkış izin listesi" |
 
 ```yaml
@@ -356,7 +357,23 @@ mcp-firewall sandbox show --policy dosya.yaml -- mcp-server-filesystem /workspac
   Sınırları: yalnızca paketin kendi sürümü sabittir; bağımlılık sürümleri ve base image etiketi derleme anında çözülür.
   Firewall image'ı içerik kimliğiyle sabitlediği için sonradan yeniden derlenen image değişmiş sunucu kodu gibi
   `initialize` anında kesilir. Kurulum script'i gereken paketler (ör. native modül derleyenler) bu yolla çalışmaz,
-  onlar için kendi Dockerfile'ınızı yazın. Yalnızca npm; PyPI (`uvx`) sunucuları desteklenmez.
+  onlar için kendi Dockerfile'ınızı yazın.
+
+  PyPI (`uvx` ile çalışan Python) sunucuları için paket `pypi:` önekiyle ve `==` tam sürümüyle verilir (17.11.2026):
+
+  ```bash
+  mcp-firewall sandbox build pypi:mcp-server-fetch==2026.8.18
+  ```
+
+  Paket `python:3.12-slim` üstüne `pip install --only-binary=:all:` ile kurulur: yalnızca wheel kabul edilir.
+  Kaynak paketin (sdist) kurulması onun derleme kodunu çalıştırır; npm'deki kurulum script'inin karşılığı budur.
+  Wheel'i olmayan bir paket ya da bağımlılık derlemeyi durdurur, kendiliğinden kaynaktan derlenmez. Image
+  `mcp-pypi-<paket>:<sürüm>` adını alır, böylece aynı adlı bir npm paketiyle çakışmaz. Çalıştırılabilir adlar paketin
+  `console_scripts` girişlerinden okunur. Aralık (`>=`), joker (`1.*`), yerel sürüm (`+abc`) ve öneksiz yazım
+  (`mcp-server-fetch==...`) reddedilir; ekosistem paketin adından tahmin edilmez. Alpine yerine Debian tabanı
+  seçildi, çünkü Python wheel'lerinin çoğu glibc için derleniyor. Denendi (Windows, Docker Desktop): mcp-server-fetch
+  2026.8.18 image'ı 29 saniyede derlendi. Firewall üzerinden `network: none` ile 1 tool geldi ve çağrı bağlanamadı;
+  `egress: { allow: [example.com] }` ile example.com getirildi, www.iana.org egress proxy'sinde reddedildi.
   Denendi (Windows, Docker Desktop): filesystem 2.2.0 image'ı 11 saniyede derlendi (266 MB), firewall üzerinden
   `network: none` ve salt okunur bir klasörle 16 tool geldi; listeleme ve okuma çalıştı, salt okunur klasöre yazma
   (`EROFS`) ve klasör dışı okuma reddedildi ([bench/sandbox-build/drive-filesystem.mjs](bench/sandbox-build/drive-filesystem.mjs)).
@@ -368,6 +385,18 @@ mcp-firewall sandbox show --policy dosya.yaml -- mcp-server-filesystem /workspac
 - Firewall kapanırken konteyner adıyla durdurulur (`docker kill`); firewall sert öldürülürse konteyner stdin'in kapanmasıyla
   kendiliğinden biter (Windows'ta GitHub MCP image'ıyla denendi: 1 saniye içinde).
 - Docker çalışmıyorsa ya da image yerelde yoksa (`pull: never`) firewall başlamaz ve ne yapılacağını söyler; sunucu sandbox'sız ayağa kalkmaz.
+
+#### Podman
+
+`runtime: podman` ile bütün komutlar (`run`, `image inspect`, `kill`, egress ağı ve proxy'si) `podman`'a gider;
+`sandbox build --runtime podman` image'ı Podman ile derler. Komut satırı Docker'dakiyle aynıdır, iki fark var:
+`no-new-privileges` Podman'ın belgelediği yalın biçimde yazılır, firewall'un kendi seçtiği image'lar da tam adla
+yazılır (`docker.io/library/node:22-alpine`, `docker.io/library/python:3.12-slim`). Podman terminal olmadan kısa adı
+reddedebiliyor (`short-name-mode: enforcing`). Sizin verdiğiniz image adı değiştirilmez; kayıt defteri belirsizse tam
+adını yazın. Podman'ın hata metinleri de tanınır: `image not known` image yok demek, `Cannot connect to Podman` ise
+"Podman makinesini başlatın" demek. **Gerçek Podman'da denenmedi** (bu makinede kurulu değil); yalnızca birim testleri
+var. Özellikle Windows/macOS'ta `podman machine` içinden klasör bağlama ve egress proxy'sinin kapalı ağda adla
+bulunması doğrulanmadı.
 
 #### Çıkış izin listesi (`egress`)
 
@@ -443,7 +472,7 @@ Uzak sunucular (`gateway`) için geçerli değildir. Yalnızca Windows'ta Docker
 | `src/egress-throttle.ts` | Egress kararlarının audit log'a yazılma sınırı |
 | `src/sandbox.ts` | Sunucuyu kilitli Docker konteynerinde başlatma: `docker run` komutu üretimi, bağlama denetimi, image kimliği (kod pini), konteyneri durdurma |
 | `src/urlblock.ts` | `urlBlocklist`: offline zararlı host/URL listelerini okuma, çağrı argümanlarındaki URL'leri bulup karşılaştırma |
-| `src/sandbox-build.ts` | `sandbox build`: npm paketini tam sürümüyle, kurulum script'leri kapalı image'a kurma; çalıştırılabilir adları kilitli konteynerde okuma |
+| `src/sandbox-build.ts` | `sandbox build`: npm paketini tam sürümüyle ve kurulum script'leri kapalı, PyPI paketini yalnızca wheel ile image'a kurma; çalıştırılabilir adları kilitli konteynerde okuma |
 | `src/decode.ts` | Metin içindeki kodlanmış parçaları çözme ve karakter düzeyinde gizlemeyi geri alma |
 | `src/audit.ts` | JSONL audit log |
 | `src/siem.ts` | Audit kayıtlarını syslog (UDP/TCP/TLS) ve OTLP/HTTP ile SIEM'e gönderme |
@@ -1238,7 +1267,8 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
    düşük isabet (%48–65) ve rol istemlerindeki yanlış alarm (`prompts/get`'te model artık yalnızca uyarıyor; değişen
    şablonu sabitleme engelliyor). ROT13 ve kelimeleri parçalara bölen saldırılar 01.11.2026'da kapatıldı
 8. Sunucu sandbox'ı (Docker) — yapıldı (08.11.2026, yukarıda "Sandbox (Docker)"); çıkış izin listesi `egress` (14.11.2026).
-   npm paketinden image kuran `sandbox build` (16.11.2026). Kalanlar: Podman, PyPI (`uvx`) sunucuları için `sandbox build`
+   npm paketinden image kuran `sandbox build` (16.11.2026). PyPI (`uvx`) sunucuları için `sandbox build pypi:...` ve
+   `runtime: podman` (17.11.2026). Kalan: Podman'ın gerçek bir Podman kurulumunda denenmesi
 
 ## Lisans
 

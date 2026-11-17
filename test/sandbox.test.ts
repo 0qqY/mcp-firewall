@@ -17,6 +17,7 @@ import {
   type Runner,
   type SandboxConfig,
 } from '../src/sandbox.js';
+import { createEgressNetwork, removeEgress } from '../src/sandbox.js';
 import { compilePolicy, PolicyError } from '../src/policy.js';
 
 const top = realpathSync(mkdtempSync(join(tmpdir(), 'mcpfw-sandbox-')));
@@ -290,4 +291,42 @@ test('killContainer asks Docker to stop the container by name and never throws',
   killContainer('mcp-fw-x-1', (cmd, args) => (calls.push([cmd, ...args]), { status: 0, stdout: '', stderr: '' }));
   assert.deepEqual(calls, [['docker', 'kill', 'mcp-fw-x-1']]);
   assert.doesNotThrow(() => killContainer('c', () => { throw new Error('boom'); }));
+});
+
+test('sandbox.runtime podman: every command goes to podman, with its own wording and fully named default images', () => {
+  assert.equal(sandbox().runtime, 'docker');
+  bad({ enabled: true, image: 'x', runtime: 'lxc' }, /sandbox\.runtime/);
+  const cfg = sandbox({ runtime: 'podman', egress: { allow: ['api.github.com'] } });
+  assert.equal(cfg.egress!.proxyImage, 'docker.io/library/node:22-alpine');
+  assert.equal(sandbox({ egress: { allow: ['api.github.com'] } }).egress!.proxyImage, 'node:22-alpine', 'docker keeps the short name');
+  assert.equal(sandbox({ runtime: 'podman', egress: { allow: ['a.b'], proxyImage: 'my/proxy:1' } }).egress!.proxyImage, 'my/proxy:1');
+  const launch = buildSandboxCommand(cfg, server, fixed);
+  assert.equal(launch.command, 'podman');
+  assert.equal(launch.egress!.proxy.command, 'podman');
+  assert.equal(launch.args[launch.args.indexOf('--security-opt') + 1], 'no-new-privileges');
+  assert.equal(buildSandboxCommand(sandbox(), server, fixed).args.includes('no-new-privileges:true'), true);
+
+  const calls: string[] = [];
+  const run: Runner = (cmd, args) => {
+    calls.push(`${cmd} ${args.slice(0, 2).join(' ')}`);
+    return { status: 0, stdout: `sha256:${'b'.repeat(64)}\n`, stderr: '' };
+  };
+  preflight(cfg, run);
+  sandboxFingerprint(cfg, undefined, run);
+  createEgressNetwork(launch.egress!, run);
+  removeEgress(launch.egress!, run, undefined, () => {});
+  assert.ok(calls.length >= 6 && calls.every((c) => c.startsWith('podman ')), calls.join(' | '));
+});
+
+test('podman: missing image, a stopped Podman machine and a missing podman command are told apart', () => {
+  const cfg = sandbox({ runtime: 'podman' });
+  const answer = (stderr: string): Runner => () => ({ status: 125, stdout: '', stderr });
+  assert.equal(inspectImage('x', answer('Error: x: image not known'), 'podman').kind, 'missing');
+  assert.equal(inspectImage('x', answer('Error: failed to find image x'), 'podman').kind, 'missing');
+  const down = answer('Cannot connect to Podman. Please verify your connection to the Linux system using `podman system connection list`, or try `podman machine init` and `podman machine start`');
+  assert.equal(inspectImage('x', down, 'podman').kind, 'unreachable');
+  assert.throws(() => preflight(cfg, down), /Podman is installed but not reachable; start it \(podman machine start/);
+  assert.throws(() => preflight(cfg, answer('Error: x: image not known')), /run: podman pull node:22-alpine/);
+  const enoent: Runner = () => ({ status: null, stdout: '', stderr: '', error: Object.assign(new Error('spawn podman ENOENT'), { code: 'ENOENT' }) });
+  assert.throws(() => preflight(cfg, enoent), /the podman command was not found; install Podman/);
 });

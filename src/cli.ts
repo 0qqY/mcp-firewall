@@ -29,10 +29,11 @@ import {
   preflight,
   removeEgress,
   sandboxFingerprint,
+  qualifyDefaultImage,
   SandboxError,
   type SandboxLaunch,
 } from './sandbox.js';
-import { buildArgs, buildNpmImage, buildSummary, DEFAULT_BUILD_BASE, defaultTag, npmDockerfile, parseNpmSpec } from './sandbox-build.js';
+import { buildArgs, buildImage, buildSummary, defaultBase, defaultTag, dockerfileFor, parseBuildSpec } from './sandbox-build.js';
 import { EgressThrottle } from './egress-throttle.js';
 import { TaintTracker } from './taint.js';
 
@@ -44,7 +45,8 @@ const USAGE = `Usage: mcp-firewall [--policy <file>] [--name <server-id>] [--cod
        mcp-firewall pins list [--policy <file>]
        mcp-firewall pins approve --name <server-id> [--policy <file>] [<tool>...]
        mcp-firewall sandbox show [--policy <file>] [--name <server-id>] [--sandbox <image>] -- <command> [args...]
-       mcp-firewall sandbox build <npm-package>@<exact-version> [--tag <image>] [--base <image>] [--print] [--force]
+       mcp-firewall sandbox build <npm-package>@<exact-version> | pypi:<package>==<exact-version>
+                            [--tag <image>] [--base <image>] [--runtime docker|podman] [--print] [--force]
 
 Options:
   --policy <file>   YAML policy file (default: $MCP_FIREWALL_POLICY, else built-in defaults)
@@ -63,8 +65,10 @@ and the image are available; it starts nothing.
 
 sandbox build makes an image for sandbox.image: the npm package at that exact version, installed with
 install scripts off on --base (default node:22-alpine), tagged mcp-<package>:<version> unless --tag is
-given. It refuses to replace an existing image without --force. --print shows the Dockerfile and builds
-nothing.
+given. A PyPI package (pypi:name==version) is installed from wheels only, so no build code runs, on
+python:3.12-slim and tagged mcp-pypi-<package>:<version>. --runtime podman builds with Podman (set
+sandbox.runtime: podman in the policy too). It refuses to replace an existing image
+without --force. --print shows the Dockerfile and builds nothing.
 
 gateway serves a Streamable HTTP MCP endpoint (default http://127.0.0.1:8787/mcp) in front of a remote
 server, with the same policy checks. --header values may name environment variables as \${VAR}, so
@@ -123,14 +127,19 @@ function withSandboxFlag(policy: Policy, options: CliOptions): Policy {
 async function runSandboxBuild(argv: string[]): Promise<void> {
   let spec: string | undefined;
   let tag: string | undefined;
-  let base = DEFAULT_BUILD_BASE;
+  let base: string | undefined;
+  let runtime: 'docker' | 'podman' = 'docker';
   let print = false;
   let force = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--print') print = true;
     else if (a === '--force') force = true;
-    else if (a === '--tag' || a === '--base') {
+    else if (a === '--runtime') {
+      const value = argv[++i];
+      if (value !== 'docker' && value !== 'podman') throw new UsageError('--runtime: expected docker or podman');
+      runtime = value;
+    } else if (a === '--tag' || a === '--base') {
       const value = argv[++i];
       if (value === undefined) throw new UsageError(`${a} needs a value`);
       if (!isImageRef(value)) throw new UsageError(`${a}: not a valid image reference: ${value}`);
@@ -140,14 +149,16 @@ async function runSandboxBuild(argv: string[]): Promise<void> {
     else if (spec === undefined) spec = a;
     else throw new UsageError(`sandbox build takes one package, got another: ${a}`);
   }
-  if (spec === undefined) throw new UsageError('sandbox build needs a package with an exact version, e.g. @modelcontextprotocol/server-filesystem@2.2.0');
-  const pkg = parseNpmSpec(spec);
-  const options = { pkg, tag: tag ?? defaultTag(pkg), base, force };
+  if (spec === undefined) {
+    throw new UsageError('sandbox build needs a package with an exact version, e.g. @modelcontextprotocol/server-filesystem@2.2.0 or pypi:mcp-server-fetch==2025.4.7');
+  }
+  const pkg = parseBuildSpec(spec);
+  const options = { pkg, tag: tag ?? defaultTag(pkg), base: base ?? qualifyDefaultImage(defaultBase(pkg), runtime), force };
   if (print) {
-    process.stdout.write(`${npmDockerfile(pkg, base)}\n# docker ${buildArgs(pkg, options.tag, '<empty folder with this Dockerfile>').join(' ')}\n`);
+    process.stdout.write(`${dockerfileFor(pkg, options.base)}\n# ${runtime} ${buildArgs(pkg, options.tag, '<empty folder with this Dockerfile>').join(' ')}\n`);
     return;
   }
-  const result = await buildNpmImage(options);
+  const result = await buildImage(options, undefined, undefined, runtime);
   process.stdout.write(buildSummary(options, result));
 }
 
@@ -164,15 +175,15 @@ function runSandbox(argv: string[]): void {
     const e = launch.egress;
     process.stdout.write(
       `${describeSandbox(policy.sandbox)}\n\n` +
-        `docker network create --internal --label mcp-firewall=1 ${e.network}\n` +
+        `${e.proxy.command} network create --internal --label mcp-firewall=1 ${e.network}\n` +
         `${formatLaunch(e.proxy)}\n` +
-        `docker network connect ${e.network} ${e.proxy.container}\n` +
+        `${e.proxy.command} network connect ${e.network} ${e.proxy.container}\n` +
         `${formatLaunch(launch)}\n\n`,
     );
   } else process.stdout.write(`${describeSandbox(policy.sandbox)}\n\n${formatLaunch(launch)}\n\n`);
   try {
     const id = preflight(policy.sandbox);
-    process.stdout.write(id ? `image is present: ${id}\n` : `image is not present locally; Docker will pull it at start (sandbox.pull: ${policy.sandbox.pull})\n`);
+    process.stdout.write(id ? `image is present: ${id}\n` : `image is not present locally; ${policy.sandbox.runtime} will pull it at start (sandbox.pull: ${policy.sandbox.pull})\n`);
   } catch (err) {
     process.stdout.write(`${(err as Error).message}\n`);
     process.exitCode = 1;
@@ -534,7 +545,7 @@ async function main(): Promise<void> {
   const stopContainer = () => {
     if (!launch || stopped) return;
     stopped = true;
-    killContainer(launch.container);
+    killContainer(launch.container, undefined, launch.command);
     if (launch.egress) {
       egressProxy?.stdin?.end();
       removeEgress(launch.egress);

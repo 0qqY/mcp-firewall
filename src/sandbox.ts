@@ -34,8 +34,12 @@ export interface SandboxEgress {
   proxyImage: string;
 }
 
+export type ContainerRuntime = 'docker' | 'podman';
+
 export interface SandboxConfig {
   enabled: boolean;
+  /** The container CLI: `docker` (default) or `podman`; both take the same command lines here. */
+  runtime: ContainerRuntime;
   /** The image the server runs in; it must contain the server's command. */
   image: string;
   /** never: use only local images | missing: pull when absent | always: pull on every start. */
@@ -63,6 +67,7 @@ export interface SandboxConfig {
 }
 
 export const SANDBOX_DEFAULTS = {
+  runtime: 'docker',
   pull: 'never',
   network: 'none',
   readOnly: true,
@@ -91,6 +96,29 @@ export const RESERVED_ENV = new Set(['HOME', 'PATH']);
 /** Set by the sandbox when `egress` is on, so they cannot be passed through then. */
 export const EGRESS_RESERVED_ENV = new Set([...PROXY_ENV, 'NODE_USE_ENV_PROXY']);
 export const DEFAULT_PROXY_IMAGE = 'node:22-alpine';
+
+/**
+ * Podman refuses a short name such as `node:22-alpine` without a terminal when more than one registry could hold it
+ * (short-name-mode enforcing), so the images the firewall picks itself are written out in full for it.
+ */
+export const qualifyDefaultImage = (image: string, runtime: ContainerRuntime): string =>
+  runtime === 'podman' && !image.includes('/') ? `docker.io/library/${image}` : image;
+
+/** Podman documents the bare form; Docker takes both. Docker's command line is left as it was. */
+const noNewPrivileges = (runtime: string): string => (runtime === 'podman' ? 'no-new-privileges' : 'no-new-privileges:true');
+
+const runtimeName = (executable: string): string => (/podman/i.test(executable) ? 'Podman' : 'Docker');
+
+/** What to do when the runtime is installed but cannot be reached. */
+export function unreachableHint(executable: string): string {
+  return runtimeName(executable) === 'Podman'
+    ? 'Podman is installed but not reachable; start it (podman machine start on Windows and macOS) and try again'
+    : 'Docker is installed but not reachable; start Docker Desktop (or the docker service) and try again';
+}
+
+export function missingHint(executable: string): string {
+  return `the ${executable} command was not found; install ${runtimeName(executable)}`;
+}
 export const isEnvName = (v: string): boolean => /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(v);
 /**
  * Characters that break the `--mount` option syntax: Docker reads it as one CSV record, so a comma starts a new
@@ -210,7 +238,7 @@ export function buildSandboxCommand(cfg: SandboxConfig, server: { command: strin
     '--pull', cfg.pull,
     '--network', egress?.network ?? cfg.network,
     '--cap-drop', 'ALL',
-    '--security-opt', 'no-new-privileges:true',
+    '--security-opt', noNewPrivileges(options.executable ?? cfg.runtime),
     '--pids-limit', String(cfg.pidsLimit),
     '--memory', cfg.memory,
     '--memory-swap', cfg.memory,
@@ -242,7 +270,7 @@ export function buildSandboxCommand(cfg: SandboxConfig, server: { command: strin
   if (cfg.workdir) args.push('-w', cfg.workdir);
   // --entrypoint makes the command after "--" the program that runs, whatever the image's own entrypoint is.
   args.push('--entrypoint', server.command, cfg.image, ...server.args);
-  return { command: options.executable ?? 'docker', args, container, egress };
+  return { command: options.executable ?? cfg.runtime, args, container, egress };
 }
 
 function defaultEgressFiles(): { main: string; lib: string } {
@@ -263,7 +291,7 @@ function buildEgress(cfg: SandboxConfig, egress: SandboxEgress, container: strin
     '--pull', cfg.pull,
     '--network', 'bridge',
     '--cap-drop', 'ALL',
-    '--security-opt', 'no-new-privileges:true',
+    '--security-opt', noNewPrivileges(options.executable ?? cfg.runtime),
     '--pids-limit', '64',
     '--memory', '128m',
     '--memory-swap', '128m',
@@ -276,7 +304,7 @@ function buildEgress(cfg: SandboxConfig, egress: SandboxEgress, container: strin
     '--entrypoint', 'node',
     egress.proxyImage, '/fw/egress-main.js',
   ];
-  return { network: `${container}-net`, proxy: { command: options.executable ?? 'docker', args, container: proxy } };
+  return { network: `${container}-net`, proxy: { command: options.executable ?? cfg.runtime, args, container: proxy } };
 }
 
 const firstLine = (r: RunResult): string => (r.error?.message ?? r.stderr).trim().split('\n')[0];
@@ -286,24 +314,24 @@ const firstLine = (r: RunResult): string => (r.error?.message ?? r.stderr).trim(
  * with the firewall's label, unused and older than five minutes: another firewall attaches its proxy within seconds of
  * creating its network, so a fresh one is never touched.
  */
-export function createEgressNetwork(egress: EgressLaunch, run: Runner = defaultRunner, executable = 'docker'): void {
+export function createEgressNetwork(egress: EgressLaunch, run: Runner = defaultRunner, executable = egress.proxy.command): void {
   run(executable, ['network', 'prune', '--force', '--filter', 'label=mcp-firewall=1', '--filter', 'until=5m'], 20_000);
   const r = run(executable, ['network', 'create', '--internal', '--label', 'mcp-firewall=1', egress.network], 20_000);
   if (r.error || r.status !== 0) throw new SandboxError(`sandbox.egress: cannot create network ${egress.network}: ${firstLine(r)}`);
 }
 
 /** Puts the running proxy on the internal network, next to the server. */
-export function connectEgressProxy(egress: EgressLaunch, run: Runner = defaultRunner, executable = 'docker'): void {
+export function connectEgressProxy(egress: EgressLaunch, run: Runner = defaultRunner, executable = egress.proxy.command): void {
   const r = run(executable, ['network', 'connect', egress.network, egress.proxy.container], 20_000);
   if (r.error || r.status !== 0) throw new SandboxError(`sandbox.egress: cannot attach the proxy to ${egress.network}: ${firstLine(r)}`);
 }
 
 /** Best effort, at exit: the proxy, then the network (which Docker removes only once no container uses it). */
-export function removeEgress(egress: EgressLaunch, run: Runner = defaultRunner, executable = 'docker', wait: (ms: number) => void = sleepSync): void {
+export function removeEgress(egress: EgressLaunch, run: Runner = defaultRunner, executable = egress.proxy.command, wait: (ms: number) => void = sleepSync): void {
   killContainer(egress.proxy.container, run, executable);
   for (let i = 0; i < 6; i++) {
     const r = run(executable, ['network', 'rm', egress.network], 10_000);
-    if (r.status === 0 || /not found|no such network/i.test(r.stderr)) return;
+    if (r.status === 0 || /not found|no such network|network not known/i.test(r.stderr)) return;
     // A killed container is removed asynchronously (--rm); give it a moment before the next try.
     wait(500);
   }
@@ -336,8 +364,8 @@ export function inspectImage(image: string, run: Runner = defaultRunner, executa
   const err = r.stderr.trim();
   if (r.status !== 0) {
     // Checked first: an image name can contain words the connection patterns look for.
-    if (/no such (image|object)/i.test(err)) return { kind: 'missing', problem: err.split('\n')[0] };
-    if (/cannot connect to the docker daemon|error during connect|is the docker daemon running|system cannot find the file specified|dockerdesktoplinuxengine|docker_engine/i.test(err)) {
+    if (/no such (image|object)|image not known|failed to find image/i.test(err)) return { kind: 'missing', problem: err.split('\n')[0] };
+    if (/cannot connect to the docker daemon|error during connect|is the docker daemon running|system cannot find the file specified|dockerdesktoplinuxengine|docker_engine|cannot connect to podman|unable to connect to podman|podman machine/i.test(err)) {
       return { kind: 'unreachable', problem: err.split('\n')[0] };
     }
     return { kind: 'error', problem: err.split('\n')[0] || `docker exited with status ${r.status}` };
@@ -348,24 +376,24 @@ export function inspectImage(image: string, run: Runner = defaultRunner, executa
 }
 
 /** Fails early, with a message that says what to do, when the sandbox cannot start. Returns the image id when the image is local. */
-export function preflight(cfg: SandboxConfig, run: Runner = defaultRunner, executable = 'docker'): string | undefined {
+export function preflight(cfg: SandboxConfig, run: Runner = defaultRunner, executable: string = cfg.runtime): string | undefined {
   if (cfg.egress) {
     const proxy = inspectImage(cfg.egress.proxyImage, run, executable);
     if (proxy.kind === 'missing' && cfg.pull === 'never') {
-      throw new SandboxError(`sandbox.egress: proxy image ${cfg.egress.proxyImage} is not present locally and sandbox.pull is "never"; run: docker pull ${cfg.egress.proxyImage}`);
+      throw new SandboxError(`sandbox.egress: proxy image ${cfg.egress.proxyImage} is not present locally and sandbox.pull is "never"; run: ${executable} pull ${cfg.egress.proxyImage}`);
     }
-    if (proxy.kind === 'no-docker') throw new SandboxError('sandbox: the docker command was not found; install Docker or turn the sandbox off');
-    if (proxy.kind === 'unreachable') throw new SandboxError('sandbox: Docker is installed but not reachable; start Docker Desktop (or the docker service) and try again');
+    if (proxy.kind === 'no-docker') throw new SandboxError(`sandbox: ${missingHint(executable)} or turn the sandbox off`);
+    if (proxy.kind === 'unreachable') throw new SandboxError(`sandbox: ${unreachableHint(executable)}`);
     if (proxy.kind === 'error') throw new SandboxError(`sandbox.egress: cannot inspect proxy image ${cfg.egress.proxyImage}: ${proxy.problem}`);
   }
   const status = inspectImage(cfg.image, run, executable);
   if (status.kind === 'ok') return status.id;
   if (status.kind === 'missing') {
     if (cfg.pull !== 'never') return undefined;
-    throw new SandboxError(`sandbox: image ${cfg.image} is not present locally and sandbox.pull is "never"; run: docker pull ${cfg.image} (or build it), or set sandbox.pull: missing`);
+    throw new SandboxError(`sandbox: image ${cfg.image} is not present locally and sandbox.pull is "never"; run: ${executable} pull ${cfg.image} (or build it), or set sandbox.pull: missing`);
   }
-  if (status.kind === 'no-docker') throw new SandboxError('sandbox: the docker command was not found; install Docker or turn the sandbox off');
-  if (status.kind === 'unreachable') throw new SandboxError('sandbox: Docker is installed but not reachable; start Docker Desktop (or the docker service) and try again');
+  if (status.kind === 'no-docker') throw new SandboxError(`sandbox: ${missingHint(executable)} or turn the sandbox off`);
+  if (status.kind === 'unreachable') throw new SandboxError(`sandbox: ${unreachableHint(executable)}`);
   throw new SandboxError(`sandbox: cannot inspect image ${cfg.image}: ${status.problem}`);
 }
 
@@ -374,7 +402,7 @@ export function preflight(cfg: SandboxConfig, run: Runner = defaultRunner, execu
  * rebuilt image shows up as changed server code (package rug pull) exactly like a changed npx package.
  * `extra` carries host paths pinned with --code.
  */
-export function sandboxFingerprint(cfg: SandboxConfig, extra?: CodeFingerprint, run: Runner = defaultRunner, executable = 'docker'): CodeFingerprint {
+export function sandboxFingerprint(cfg: SandboxConfig, extra?: CodeFingerprint, run: Runner = defaultRunner, executable: string = cfg.runtime): CodeFingerprint {
   const status = inspectImage(cfg.image, run, executable);
   if (status.kind !== 'ok') throw new Error(`cannot identify sandbox image ${cfg.image}: ${status.problem}`);
   const notes = [...(extra?.notes ?? [])];
