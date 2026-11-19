@@ -2,7 +2,7 @@
   "name": "mcp-firewall",
   "version": "0.1.0",
   "description": "Policy-enforcing stdio proxy for Model Context Protocol servers",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "bin": {
     "mcp-firewall": "dist/src/cli.js"

@@ -1275,5 +1275,5 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 
 ## Lisans
 
-Kod ve belgeler MIT lisanslıdır, bkz. [LICENSE](LICENSE). Eğitilmiş modeller ve eğitim verileri depoda yer almaz;
+Kod ve belgeler Apache License 2.0 ile lisanslıdır, bkz. [LICENSE](LICENSE) ve [NOTICE](NOTICE). Eğitilmiş modeller ve eğitim verileri depoda yer almaz;
 MCPTox verisiyle eğitilen modeller yeniden dağıtılamaz. Dış veri setleri yalnızca yerel değerlendirmede kullanıldı.
