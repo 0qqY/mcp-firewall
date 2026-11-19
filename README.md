@@ -55,6 +55,16 @@ npm install
 npm test
 ```
 
+ML katmanının modeli (Katman 2) Hugging Face'te:
+[OrhanOztas/tuuf-mcp-firewall](https://huggingface.co/OrhanOztas/tuuf-mcp-firewall). `policy.example.yaml`'ın
+beklediği klasöre indir (`pip install huggingface_hub` ile gelen `hf` komutu):
+
+```bash
+hf download OrhanOztas/tuuf-mcp-firewall --local-dir models/mcp-pi-mmbert-mixraw-ab4-evilsandangels-30
+```
+
+Modelsiz denemek için politikada `ml.enabled: false` yaz; kurallar, DLP, pinning ve diğer katmanlar çalışmaya devam eder.
+
 ## Kullanım
 
 ```
@@ -628,7 +638,7 @@ veri seti" bölümü). Önceki varsayılan mix-ab4-lab-30 (eşik 0.9) `models/` 
 `ml.model` ve `ml.threshold` değerlerini değiştirmek yeter. Ölçümler aşağıda "Çok dilli eğitim
 ve mmBERT", "Görev talimatı verisi", "Güvenlik mühendisliği metni", "DeepSeek ile üretilen araç çıktıları",
 "Panel etiketleriyle eğitim" ve "evilsandangels ikiz veri seti" başlıklarında.
-Eğitim verisinde MCPTox olduğu için (yazar izniyle, yeniden dağıtılamaz) model dağıtılmaz; `training/` içinde, açık
+Model Hugging Face'te: [OrhanOztas/tuuf-mcp-firewall](https://huggingface.co/OrhanOztas/tuuf-mcp-firewall) (MCPTox verisi yazarların izniyle kullanıldı). Kendin üretmek için `training/` içinde, açık
 veri setleri indirildikten sonra (aşağıdaki tablo) şöyle üretilir (iki eğitim RTX 5050'de ~100 dk; çeviri adımı
 ayrıca sürer):
 
@@ -1275,5 +1285,5 @@ görülmemiş saldırı ifadelerine genellemeyi ölçer. Yine de sentetik veri b
 
 ## Lisans
 
-Kod ve belgeler Apache License 2.0 ile lisanslıdır, bkz. [LICENSE](LICENSE) ve [NOTICE](NOTICE). Eğitilmiş modeller ve eğitim verileri depoda yer almaz;
-MCPTox verisiyle eğitilen modeller yeniden dağıtılamaz. Dış veri setleri yalnızca yerel değerlendirmede kullanıldı.
+Kod ve belgeler Apache License 2.0 ile lisanslıdır, bkz. [LICENSE](LICENSE) ve [NOTICE](NOTICE). Eğitim verileri depoda yer almaz; varsayılan model
+Hugging Face'te Apache-2.0 ile yayımlandı ([OrhanOztas/tuuf-mcp-firewall](https://huggingface.co/OrhanOztas/tuuf-mcp-firewall); MCPTox verisi yazarların izniyle kullanıldı). Dış veri setleri yalnızca yerel değerlendirmede kullanıldı.
